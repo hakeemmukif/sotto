@@ -86,6 +86,20 @@ discriminator is enable-then-verify: `CGEvent.tapEnable(tap:enable:true)` follow
 coordinator. Also note the grant attaches to the **responsible** app, so running the suite from a
 terminal creates an entry under Terminal — `Sotto.app` needs its own grant (task 14).
 
+**Measured during task 7, 2026-08-05 — secure input is currently stuck on, and it will block Sotto.**
+
+```
+IsSecureEventInputEnabled():  true
+kCGSSessionSecureInputPID:    413  ->  /System/Library/CoreServices/loginwindow.app
+```
+
+Nothing in this project caused it; `loginwindow` is holding the session-global flag, a known stale
+state. Requirement 4 of task 7 says secure input must refuse dictation up front with a red pill, so a
+correctly-built Sotto **will refuse every dictation on this machine until the flag clears** — almost
+certainly at the next logout or reboot. Independently reproduced by the coordinator. This is a
+machine state, not a defect: do not "fix" it in code, and do not weaken the guard to work around it.
+Re-check with the two commands above before concluding that insertion is broken.
+
 ## Settled decisions
 
 | # | Decision | Rationale |
