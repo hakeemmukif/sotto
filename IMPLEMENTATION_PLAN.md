@@ -362,7 +362,12 @@ verified by hand once, using the `codesign -dr -` comparison already proven abov
 | `exec:subagent` | autonomous, test-gated |
 | `exec:session` | needs you at the keyboard — tasks 8 and 12 |
 
-**Test command:** `swift test`
+**Test command:** `./test.sh`
+
+> Not `swift test`. Measured 2026-08-05 during task 1: on this Command-Line-Tools-only machine the
+> `xctest` runner tool does not exist (`xcrun --find xctest` fails), so bare `swift test` builds the
+> test bundle, runs **zero** tests, and exits 0 — a green result that proves nothing. `--disable-xctest`
+> and `--enable-swift-testing` do not help. `test.sh` adds the one flag that does.
 
 **Build command:** `./build.sh` (must emit a signed bundle; an unsigned bundle is a failed build)
 
