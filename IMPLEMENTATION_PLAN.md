@@ -70,6 +70,22 @@ Environment, verified:
   keychain. Public cert retained at the scratchpad path for reference; not needed to build.
 - No competing hotkey grabbers installed (no Raycast, Alfred, Karabiner, BetterTouchTool).
 
+**Measured during task 3, 2026-08-05 — a denied event tap does not fail the way you would expect.**
+Without Input Monitoring, `CGEvent.tapCreate` returns a **non-nil** `CFMachPort` that the system then
+refuses to enable:
+
+```
+CGPreflightListenEventAccess: false
+tapCreate non-nil:            true      <- the obvious `guard let` passes
+enabled after tapEnable:      false     <- and the app watches nothing, silently, forever
+```
+
+So `guard let port = tapCreate(...) else { throw }` is **not** a sufficient permission check. The
+discriminator is enable-then-verify: `CGEvent.tapEnable(tap:enable:true)` followed by
+`CGEvent.tapIsEnabled(tap:)`, throwing when it comes back false. Independently reproduced by the
+coordinator. Also note the grant attaches to the **responsible** app, so running the suite from a
+terminal creates an entry under Terminal — `Sotto.app` needs its own grant (task 14).
+
 ## Settled decisions
 
 | # | Decision | Rationale |
