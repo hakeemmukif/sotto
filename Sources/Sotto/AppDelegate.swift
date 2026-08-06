@@ -42,8 +42,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
 
         // macOS only lists an app under Microphone once it has asked, so this call is what makes the
-        // grant reachable at all.
-        AVCaptureDevice.requestAccess(for: .audio) { _ in }
+        // grant reachable at all. Sotto is LSUIElement, so it activates first — a background app with
+        // no Dock presence does not reliably surface the TCC dialog.
+        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        Self.diagnose("microphone status at launch = \(micStatus.rawValue) (0=notDetermined 2=denied 3=authorized)")
+        if micStatus == .notDetermined {
+            NSApp.activate(ignoringOtherApps: true)
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                Self.diagnose("microphone requestAccess returned granted=\(granted)")
+            }
+        }
 
         let onAlarm: @Sendable (HotkeyAlarm) -> Void = { alarm in
             NSLog("Sotto: hotkey alarm raised — \(alarm). Rules 1-4 of task 3 have been violated.")
@@ -72,7 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 settings: settings,
                 whisperBinaryPath: Self.whisperBinaryPath,
                 history: history
-            ) { [pill] _, state in
+            ) { [pill] sequence, state in
+                Self.diagnose("job \(sequence) → \(state)")
                 DispatchQueue.main.async {
                     guard let visible = PillState(state) else { return pill.hide() }
                     pill.show(visible)

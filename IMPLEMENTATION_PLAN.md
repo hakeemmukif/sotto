@@ -100,6 +100,28 @@ certainly at the next logout or reboot. Independently reproduced by the coordina
 machine state, not a defect: do not "fix" it in code, and do not weaken the guard to work around it.
 Re-check with the two commands above before concluding that insertion is broken.
 
+**Measured during post-review debugging, 2026-08-06 — Hardened Runtime silently kills the microphone.**
+
+`build.sh` signs with `--options runtime`, and task 1 shipped an **empty** entitlements file. Under
+Hardened Runtime the microphone is refused unless `com.apple.security.device.audio-input` is present,
+and the refusal is instant and silent:
+
+```
+microphone status at launch = 0 (notDetermined)
+microphone requestAccess returned granted=false     <- same second, no dialog ever shown
+preflight -- mic=2 (denied)
+```
+
+No dialog appears, and the app never appears in System Settings > Microphone, because the request was
+never legitimate. This is indistinguishable from a user having denied permission, and no amount of
+clicking in System Settings fixes it. Fixed by adding the entitlement. Note that
+`Resources/Sotto.entitlements` **must not contain XML comments** — `AMFIUnserializeXML` rejects them
+with `syntax error`, unlike `plutil`.
+
+**Also settled the same day: plan risk 3 is closed.** `fn` *is* capturable by a listen-only session tap
+on macOS 26 with `AppleFnUsageType` unset — seven jobs fired from real `fn` holds. No chord fallback
+and no preference change is needed.
+
 ## Settled decisions
 
 | # | Decision | Rationale |
