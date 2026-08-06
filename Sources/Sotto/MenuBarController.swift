@@ -10,7 +10,7 @@ import ServiceManagement
 final class MenuBarController: NSObject {
     private let statusItem: NSStatusItem
     private let history: History
-    private let hotkeyLabel: String
+    private let hotkeyLabel: String?
     private let startDictation: () throws -> Void
     private let stopDictation: () -> Void
     private let registerLoginItem: () throws -> Void
@@ -30,7 +30,7 @@ final class MenuBarController: NSObject {
     init(
         statusItem: NSStatusItem,
         history: History,
-        hotkeyLabel: String,
+        hotkeyLabel: String?,
         dictationEnabled: Bool,
         dictationError: String?,
         startDictation: @escaping () throws -> Void,
@@ -147,7 +147,11 @@ final class MenuBarController: NSObject {
 
     private var statusText: String {
         if let dictationError { return "Not running: \(dictationError)" }
-        return isDictationEnabled ? "Listening — hold \(hotkeyLabel)" : "Dictation off"
+        guard isDictationEnabled else { return "Dictation off" }
+        // No hotkey means settings never loaded, so there is no key to name. Say that, rather than
+        // rendering "hold " with an invented blank.
+        guard let hotkeyLabel else { return "Listening" }
+        return "Listening — hold \(hotkeyLabel)"
     }
 
     // Most recent first, so the entry you just dictated is the one at the top when a paste went to

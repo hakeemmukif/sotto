@@ -1,3 +1,4 @@
 .build/
 Sotto.app/
 .env
+.DS_Store
