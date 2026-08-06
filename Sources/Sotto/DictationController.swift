@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Carbon
 import CoreGraphics
@@ -78,6 +79,29 @@ extension Hotkey {
     }
 }
 
+/// Wraps a real `Cleaner` to adapt the cleanup prompt to whatever app is frontmost when cleanup
+/// runs, so `run()` and the designated init stay untouched: they still just call
+/// `cleaner.clean(transcript, system: Prompts.cleanup)`.
+private struct ProfiledCleaner: Cleaner {
+    let underlying: Cleaner
+    let appProfiles: [String: String]
+    let vocabulary: String?
+
+    func clean(_ transcript: String, system: String) async throws -> String {
+        let profile = try AppProfiles.profile(
+            for: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+            in: appProfiles
+        )
+        // The vocabulary steers whisper *and* the cleanup pass: knowing "Drizzle" is a proper noun
+        // stops the model correcting it back to "drizzle" after whisper got it right.
+        var system = system + "\n\n" + profile
+        if let vocabulary {
+            system += "\n\nThese terms are spelled correctly, leave them as they are: \(vocabulary)"
+        }
+        return try await underlying.clean(transcript, system: system)
+    }
+}
+
 /// Unchecked because every piece of mutable state below lives behind `lock`, and the two queues
 /// partition the rest: `jobQueue` runs transcription and cleanup concurrently, `insertionQueue` is
 /// serial so only one insertion is ever in flight.
@@ -138,7 +162,14 @@ final class DictationController: @unchecked Sendable {
             throw DictationError.unsupportedWhisperBackend(settings.whisperBackend.rawValue)
         }
         let hotkey = try Hotkey(settingsValue: settings.hotkey)
-        let cleaner = try DictationController.cleaner(for: settings)
+        let vocabularyPrompt = try Vocabulary.whisperPrompt(settings.vocabulary)
+        let cleaner = try DictationController.cleaner(for: settings).map {
+            ProfiledCleaner(
+                underlying: $0,
+                appProfiles: settings.appProfiles,
+                vocabulary: vocabularyPrompt
+            ) as Cleaner
+        }
         let transcriber = Transcriber(binaryPath: whisperBinaryPath, modelPath: settings.whisperModelPath)
         let inserter = TextInserter(mode: settings.insertionMode)
         // One recorder, because you can only speak one dictation at a time. `start` and `stop` reach
@@ -149,7 +180,7 @@ final class DictationController: @unchecked Sendable {
             hotkey: hotkey,
             startRecording: { try recorder.start() },
             stopRecording: { try recorder.stop() },
-            transcribe: { try transcriber.transcribe($0, vocabularyPrompt: nil) },
+            transcribe: { try transcriber.transcribe($0, vocabularyPrompt: vocabularyPrompt) },
             cleaner: cleaner,
             permitInsertion: { try inserter.permitInsertion() },
             insert: { try inserter.insert($0, permit: $1) },
