@@ -1,259 +1,286 @@
 # Sotto
 
-System-wide push-to-talk dictation for macOS. Hold a hotkey, speak, release; the cleaned-up text
-lands at the cursor in whatever app has focus.
+System-wide push-to-talk dictation for macOS. Hold a key, speak, release — clean text lands at your
+cursor in whatever app has focus.
 
-Runs on one machine (Apple M5 Pro, macOS 26.5.1). Not distributed, not notarized, no accounts, no
-telemetry. Background menu bar app — no Dock icon.
-
-## What's built
-
-Hold-to-talk hotkey, microphone capture, local transcription (whisper.cpp), LLM cleanup (Ollama by
-default, Groq/OpenAI optionally), cursor insertion with clipboard restore, a floating status pill,
-menu bar controls, launch at login, custom vocabulary, per-app style profiles, and an in-memory
-20-entry dictation history.
-
-Voice editing (rewriting a selection by voice) is not built yet.
-
-## Requirements
-
-- macOS with Command Line Tools installed (`xcode-select --install`). No Xcode is required or
-  used — this repo builds and tests entirely through `swiftc`/SwiftPM from the Command Line Tools.
-- Swift 6 toolchain (ships with the Command Line Tools).
-- `whisper-cli` from Homebrew's `whisper-cpp`, at `/opt/homebrew/bin/whisper-cli`:
-  ```
-  brew install whisper-cpp
-  ```
-- Ollama running locally with `qwen3:8b` pulled, for the default cleanup backend:
-  ```
-  brew install ollama
-  ollama pull qwen3:8b
-  ```
-- A code signing identity named `Sotto Dev` in your login keychain (see "Signing" below).
-
-## Build
+Everything runs locally. No account, no API key, no telemetry, no network calls. Transcription is
+whisper.cpp; the cleanup pass that strips "um" and fixes punctuation is a local LLM through Ollama.
 
 ```
-./build.sh
+hold ctrl ──▶ record ──▶ whisper.cpp ──▶ Ollama cleanup ──▶ paste at cursor
+                          ~0.9 s           ~0.75 s            clipboard restored
 ```
 
-This runs `swift build -c release`, assembles `Sotto.app`, and signs it with the `Sotto Dev`
-identity. It ends by printing the designated requirement and failing if it doesn't match `Sotto
-Dev`'s certificate root.
+> **Scope.** This was built to run on one machine — an M5 Pro on macOS 26. It is signed with a
+> self-signed certificate and is not notarized. You can build and run it, but expect to do the
+> permissions dance below. It is not a product.
 
-The first time `codesign` uses the `Sotto Dev` private key in a given context, macOS shows an
-interactive keychain prompt ("codesign wants to use your confidential information..."). **`./build.sh`
-will appear to hang at `Sotto.app: replacing existing signature` until that dialog is answered.**
-Click **Always Allow** — plain "Allow" only grants that one invocation, and the next build hangs
-again. If the script appears stuck at that line, check for the dialog rather than assuming the
-build has failed; do not kill the process, and do not re-sign the bundle ad-hoc as a workaround —
-an ad-hoc-signed build loses every permission grant on the next rebuild (see "Signing" below).
+---
 
-## Test
+## What it does
 
-```
-./test.sh
-```
+- **Push-to-talk from anywhere.** A global event tap sees the key in any app.
+- **Local transcription** via `whisper-cli`, defaulting to `ggml-medium.en`.
+- **LLM cleanup** that removes filler and fixes punctuation without ever *answering* what you said.
+- **Pastes at the cursor** and restores your previous clipboard — including images and files, not
+  just text.
+- **Refuses loudly** when it can't work: a red pill for secure input, amber when cleanup is
+  unreachable, and a specific error naming the exact System Settings pane when a permission is
+  missing.
+- **Custom vocabulary** so `pnpm` and `Drizzle` survive both whisper and the cleanup pass.
+- **Per-app style profiles** — lowercase and unpunctuated in Terminal, full prose in Mail.
+- **In-memory history** of the last 20 transcripts, re-copyable from the menu bar. Nothing on disk.
 
-**Do not run bare `swift test`.** This machine has no Xcode, only the Command Line Tools, and the
-`xctest` runner tool that `swift test` normally hands off to does not exist here
-(`xcrun --find xctest` fails). Bare `swift test` builds the test bundle, finds no runner, and exits
-**0 having run zero tests** — a clean-looking pass that proves nothing. `--disable-xctest` and
-`--enable-swift-testing` do not fix this either. `test.sh` points `swiftc` at the Command Line
-Tools' framework directory so SwiftPM uses the swift-testing entry point instead:
+## Measured performance
 
-```sh
-exec swift test -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks "$@"
-```
-
-95 tests currently pass. A handful of them drive the real `whisper-cli` and the real Ollama server
-(not mocks), so both need to be installed and running for the suite to pass — see "Requirements"
-above.
-
-## Permissions
-
-Sotto needs three grants before dictation works. All three are scoped to `Sotto.app` specifically —
-running the test suite or `whisper-cli` from a terminal does **not** satisfy them, because the grant
-attaches to whichever app made the request (Terminal, in that case), not to Sotto.
-
-### 1. Input Monitoring
-
-Sotto watches for the hold/release of the dictation hotkey with a `CGEventTap`, which macOS gates
-behind Input Monitoring.
-
-- **System Settings › Privacy & Security › Input Monitoring** → enable **Sotto**.
-- Launch `Sotto.app` at least once first — it won't appear in the list until it has asked.
-- A denied grant does **not** make `CGEvent.tapCreate` fail. It returns a non-nil tap port that
-  the system then silently refuses to enable — the app launches looking fine and simply never
-  reacts to the hotkey. Sotto checks for this itself (`CGEvent.tapIsEnabled` after
-  `tapEnable`) and refuses to start dictation with a named error rather than watching nothing, but
-  from the outside "Sotto launched" is not evidence the hotkey works — check the checkbox.
-
-### 2. Accessibility
-
-Sotto posts a synthetic Cmd-V to paste the transcript into the frontmost app, and (once voice
-editing is built) will read the selected text via the Accessibility API. Posting synthetic
-keyboard events system-wide requires this grant regardless of which app is frontmost.
-
-- **System Settings › Privacy & Security › Accessibility** → enable **Sotto**.
-
-### 3. Microphone
-
-- **System Settings › Privacy & Security › Microphone**.
-- Sotto cannot be added to this list in advance — macOS only lists an app under Microphone once it
-  has actually requested access, and Sotto requests it at launch. Launch `Sotto.app` once, then
-  find it in the list and enable it.
-
-### Diagnosing "the hotkey stopped working"
-
-If dictation was working and stops, the fastest check is whether the current `Sotto.app` is still
-signed with the `Sotto Dev` identity:
-
-```
-codesign -dr - Sotto.app
-```
-
-Expect a line containing:
-
-```
-certificate root = H"a22ef0b5e30d5b9650c2b0db015badb15e924a7c"
-```
-
-If that line is missing — an ad-hoc signature shows a bare `cdhash` instead, with no `certificate
-root` at all — the grants above no longer apply to this binary. macOS ties Input Monitoring and
-Accessibility to an app's designated requirement, not its name or path; every ad-hoc-signed rebuild
-gets a new identity, so a grant made against yesterday's build silently stops covering today's
-even though System Settings still shows the checkbox ticked. The fix is `./build.sh`, which always
-signs with `Sotto Dev`, whose requirement is stable across rebuilds — never patch this by re-signing
-ad-hoc.
-
-### Secure input
-
-macOS has a separate, session-wide "secure input" mode (used by password fields and some terminal
-apps) that silently drops synthetic keyboard events. Sotto checks for it before recording starts
-and refuses with a red pill rather than transcribing something it can never paste. If dictation
-refuses everywhere, including outside any password field, check whether the flag is stuck on:
-
-```
-ioreg -l -w 0 | grep kCGSSessionSecureInputPID
-```
-
-No output means secure input is off. A line naming a PID means something is holding it — on this
-machine it was once `loginwindow`, a known stale state unrelated to Sotto — and the fix is a logout
-or reboot, not a code change.
-
-## What to expect
-
-Measured on this machine (Apple M5 Pro, 24 GB) for a 9.33 s clip:
+On an M5 Pro, against a 9.33 s clip. These numbers drove the design, not the other way round.
 
 | Stage | Cold | Warm |
 |---|---|---|
-| Transcription, `medium.en` | 8.44 s | 0.91 s |
-| Cleanup, Ollama `qwen3:8b` | 2.75 s | 0.75 s |
-| End-to-end (transcribe + clean + paste) | — | ~1.86 s |
+| `whisper-cli` + `ggml-medium.en` | 8.44 s | **0.91 s** |
+| `whisper-cli` + `ggml-small.en` | 8.44 s | **0.40 s** |
+| Ollama `qwen3:8b` cleanup | 2.75 s | **0.75 s** |
+| End to end | — | **~1.86 s** |
 
-The cold numbers are what an empty page cache costs the first inference after a reboot. Sotto pays
-that cost once at launch (and again if you re-enable dictation from the menu bar) by running a
-silent throwaway transcription, so a real dictation is never the one that eats 8 seconds.
+Two consequences worth knowing:
+
+**There is no streaming transcription.** At 10–23× realtime, chunked streaming with partial-result
+merging — by far the hardest thing in this project — buys nothing. Transcription happens on release.
+
+**The model is warmed at launch.** The 8.44 s cold figure is an empty page cache. Without a warm-up
+pass, your first dictation after a reboot takes eight seconds. Sotto pays that cost at login instead.
+
+---
+
+## Requirements
+
+- macOS 14+ (developed on 26.5)
+- Swift 6.3+ via Command Line Tools — **Xcode is not required**
+- A code signing identity (see [Signing](#signing), and read it before you skip it)
+
+```sh
+brew install whisper-cpp ollama
+ollama serve &
+ollama pull qwen3:8b
+
+mkdir -p ~/Library/Application\ Support/Sotto/models
+curl -L -o ~/Library/Application\ Support/Sotto/models/ggml-medium.en.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin
+```
+
+## Install
+
+```sh
+git clone https://github.com/hakeemmukif/sotto.git
+cd sotto
+
+cp settings.example.json ~/Library/Application\ Support/Sotto/settings.json
+
+./build.sh
+open Sotto.app
+```
+
+`build.sh` will pause on a keychain dialog the first time. Click **Always Allow** — plain "Allow"
+means it asks again on every build.
+
+Then grant permissions (next section), quit and relaunch, and hold your hotkey.
+
+---
+
+## Permissions
+
+Sotto needs three grants. **It will not work until all three are in place**, and each fails in its
+own way.
+
+| Permission | System Settings ▸ Privacy & Security ▸ | Why | Without it |
+|---|---|---|---|
+| **Input Monitoring** | Input Monitoring | the `CGEventTap` that sees your hotkey | the hotkey does nothing at all |
+| **Accessibility** | Accessibility | posting the synthetic ⌘V, and reading selections | it transcribes but never inserts |
+| **Microphone** | Microphone | recording you | every dictation refuses immediately |
+
+For Input Monitoring and Accessibility: click **+**, press `⌘⇧G`, and paste the full path to
+`Sotto.app`. Microphone cannot be added by hand — macOS only lists an app once it has *asked*, and
+Sotto asks at launch.
+
+**Quit and relaunch after granting.** A new Input Monitoring grant is only picked up at process
+start.
+
+### Check what Sotto actually sees
+
+Sotto writes its startup state to a log. This is the fastest way to find out which grant is missing:
+
+```sh
+cat ~/Library/Logs/Sotto.log
+```
+
+```
+microphone status at launch = 3 (0=notDetermined 2=denied 3=authorized)
+preflight — listenEvent=true axTrusted=true mic=3
+startListening succeeded — hotkey ctrl is live
+```
+
+All three `true`/`3` and a `startListening succeeded` means Sotto is armed. Anything else names the
+problem.
+
+> **Never diagnose by running the binary directly.** `./Sotto.app/Contents/MacOS/Sotto` makes your
+> *terminal* the responsible process for TCC, so macOS reports the terminal's permissions and every
+> value reads false — even when Sotto's own grants are fine. Always `open Sotto.app` and read the
+> log.
+
+---
 
 ## Settings
 
-Sotto reads `~/Library/Application Support/Sotto/settings.json`. There is no default: a missing
-file, or a missing required key inside it, throws a named error at launch rather than falling back
-to a guessed value — the error names the exact missing key.
-
-`settings.example.json` in the repo root is a complete, valid example:
+`~/Library/Application Support/Sotto/settings.json`. Every key is required. **A missing key throws a
+named error rather than defaulting to anything** — that is deliberate, and it is the rule the whole
+codebase is built on.
 
 ```json
 {
-  "hotkey": "fn",
+  "hotkey": "ctrl",
   "whisperModelPath": "~/Library/Application Support/Sotto/models/ggml-medium.en.bin",
   "whisperBackend": "local",
   "cleanupBackend": "ollama",
   "cleanupModel": "qwen3:8b",
-  "vocabulary": [
-    "pnpm",
-    "Drizzle"
-  ],
+  "vocabulary": ["pnpm", "Drizzle"],
   "appProfiles": {
     "default": "Fix punctuation and capitalisation using standard sentence case.",
     "com.apple.Terminal": "Lowercase, no trailing period.",
-    "com.apple.mail": "Full prose with complete sentences.",
     "com.microsoft.VSCode": "Preserve identifiers verbatim, no sentence-casing."
   },
   "insertionMode": "paste"
 }
 ```
 
-Field by field:
+| Key | Values |
+|---|---|
+| `hotkey` | `"fn"`, a bare modifier (`"ctrl"`, `"cmd"`, `"opt"`, `"shift"`), or a chord (`"ctrl+space"`, `"cmd+shift+f13"`) |
+| `whisperModelPath` | path to a `ggml-*.bin`; `~` is expanded |
+| `whisperBackend` | `local` |
+| `cleanupBackend` | `ollama`, `groq`, `openai`, or `none` |
+| `cleanupModel` | e.g. `qwen3:8b` |
+| `vocabulary` | terms fed to whisper *and* the cleanup prompt. Capped at whisper's 224-token prompt limit — an over-long list throws rather than silently truncating |
+| `appProfiles` | bundle id → prompt fragment. A profile named `default` **must exist** |
+| `insertionMode` | `paste` (⌘V) or `unicodeKeystrokes` (slower, mangled by editors with auto-pairing) |
 
-- **`hotkey`** — `"fn"`, or a chord built from `cmd`/`ctrl`/`opt`/`shift` plus one of `space`,
-  `escape`, `f13`–`f19`, e.g. `"ctrl+space"`. Anything else throws
-  `DictationError.unparseableHotkey`.
-- **`whisperModelPath`** — path to a `ggml` model file; `~` is expanded. Two models are installed
-  on this machine, both under `~/Library/Application Support/Sotto/models/`:
-  - `ggml-medium.en.bin` (1.4 GB) — the default. Slower, but capitalises proper nouns
-    (`Drizzle`) that `small.en` gets wrong, and technical dictation is mostly proper nouns.
-  - `ggml-small.en.bin` (465 MB) — faster (0.40 s warm vs. 0.91 s), lower accuracy on proper
-    nouns. Switch to it by changing this one path.
-  A path that doesn't resolve to a file throws `TranscriberError.modelMissing`.
-- **`whisperBackend`** — must be `"local"`. `"groq"` and `"openai"` are recognised values but not
-  yet implemented as transcription backends; setting either throws
-  `DictationError.unsupportedWhisperBackend`. Any other string throws
-  `SettingsError.unknownBackend`.
-- **`cleanupBackend`** — one of:
-  - `"ollama"` — default. Talks to `http://localhost:11434/api/generate`. An unreachable server
-    throws `CleanupError.backendUnavailable` at cleanup time, which Sotto treats as a designed
-    degradation: the raw transcript still gets pasted, and the pill turns amber instead of the
-    dictation silently failing.
-  - `"groq"` / `"openai"` — OpenAI-compatible chat completions. Require an API key (see below). A
-    missing key throws `CleanupError.missingKey("GROQ_API_KEY")` or
-    `CleanupError.missingKey("OPENAI_API_KEY")` at launch — before any recording, not mid-dictation.
-  - `"none"` — no cleanup pass; the raw transcript is pasted verbatim and cleanup is never invoked.
-  - Any other string throws `SettingsError.unknownBackend`.
-- **`cleanupModel`** — the model name passed to whichever cleanup backend is selected, e.g.
-  `"qwen3:8b"` for Ollama.
-- **`vocabulary`** — array of terms injected into whisper's `--prompt` and appended to the cleanup
-  system prompt, so proper nouns and jargon transcribe and survive cleanup correctly. Whisper's
-  prompt is capped at 224 tokens; an over-long list throws `VocabularyError.tooLong` up front
-  rather than silently truncating.
-- **`appProfiles`** — maps a frontmost app's bundle identifier to a style instruction appended to
-  the cleanup prompt. **A `"default"` key is required** — it's used for any app not otherwise
-  listed, and its absence throws `AppProfileError.missingDefaultProfile` rather than falling back
-  to an implicit default.
-- **`insertionMode`** — `"paste"` (default; pasteboard + synthetic Cmd-V) or `"unicodeKeystrokes"`
-  (opt-in; synthesises the text as keystrokes instead, slower on long text and mangled by editors
-  with auto-pairing, but usable where paste doesn't work). Any other string throws
-  `SettingsError.unknownInsertionMode`.
+A bare modifier is held exactly like `fn`. Convenient on a keyboard with no `fn` key — but note that
+`"ctrl"` means every `ctrl`-based shortcut also starts a recording. The 300 ms floor discards
+anything shorter than a deliberate hold, so quick chords are usually harmless. Use `"ctrl+space"` if
+it bothers you.
 
-Every key above is required; none has a default. Missing any of `hotkey`, `whisperModelPath`,
-`whisperBackend`, `cleanupBackend`, `cleanupModel`, `vocabulary`, `appProfiles`, or `insertionMode`
-throws `SettingsError.missingKey("<name>")` naming exactly the key that's missing.
+`groq` and `openai` read their keys from `.env` at the repo root or `~/.config/sotto/.env`. A
+missing key throws `missingKey("GROQ_API_KEY")` — it never silently falls back to another backend.
 
-To install your settings file:
+---
 
-```
-mkdir -p ~/Library/Application\ Support/Sotto
-cp settings.example.json ~/Library/Application\ Support/Sotto/settings.json
+## Signing
+
+**An unsigned build is a broken build.** macOS binds Accessibility and Input Monitoring grants to an
+app's *designated requirement*, not its name or path. Ad-hoc signed, every rebuild is a new
+identity: the grant silently stops applying, System Settings still shows a ticked checkbox, and that
+stale entry blocks a fresh prompt. You would re-grant after every build.
+
+`build.sh` signs with a self-signed identity and then asserts the result, exiting non-zero if it
+doesn't match. To use your own, create a self-signed `codeSigning` certificate in Keychain Access,
+trust it, then update `IDENTITY` and the expected certificate hash in `build.sh`.
+
+Diagnostic when the hotkey suddenly stops working:
+
+```sh
+codesign -dr - Sotto.app
 ```
 
-### API keys for Groq / OpenAI
+You want `identifier "com.hakeem.sotto" and certificate root = H"..."`. If you see a bare `cdhash`,
+the bundle is ad-hoc signed and its grants are dead.
 
-Only needed if `cleanupBackend` is `"groq"` or `"openai"`. Sotto reads `GROQ_API_KEY` or
-`OPENAI_API_KEY` from the first of these two files that contains it:
+### Hardened Runtime and the microphone
 
-1. `.env` in the repo root (the working directory `Sotto.app` was launched from)
-2. `~/.config/sotto/.env`
-
-Each is a plain `KEY=value` line, e.g. `GROQ_API_KEY=gsk_...`. These files are read directly by
-Sotto at startup, not exported into the shell environment.
-
-## Run
+`build.sh` signs with `--options runtime`. Under Hardened Runtime the microphone is refused **unless
+`com.apple.security.device.audio-input` is in the entitlements** — and the refusal is instant,
+silent, and produces no dialog:
 
 ```
-open Sotto.app
+microphone status at launch = 0 (notDetermined)
+microphone requestAccess returned granted=false     ← same second, no prompt ever shown
 ```
 
-Look for the microphone icon in the menu bar — no Dock icon appears (`LSUIElement` is set). Click
-it for Turn Dictation On/Off, Launch at Login, and the last 20 transcripts (cleared on quit — never
-written to disk). Hold the configured hotkey anywhere, speak, release.
+The app then never appears under System Settings ▸ Microphone at all, because the request was never
+legitimate. This is indistinguishable from a user having denied permission, and no amount of
+clicking fixes it. If you fork this and strip the entitlements file, this is what you'll hit.
+
+`Resources/Sotto.entitlements` must also contain **no XML comments** — `AMFIUnserializeXML` rejects
+them with a syntax error, unlike `plutil`.
+
+---
+
+## Development
+
+```sh
+./test.sh          # 108 tests
+./build.sh         # signed Sotto.app
+```
+
+> **Use `./test.sh`, never bare `swift test`.** Without Xcode there is no `xctest` runner, so
+> `swift test` builds the test bundle, runs **zero tests**, and exits 0. It is a green result that
+> proves nothing. `--disable-xctest` and `--enable-swift-testing` don't help; `test.sh` adds the one
+> flag that does.
+
+### Architecture
+
+| File | Responsibility |
+|---|---|
+| `HotkeyMonitor` | `CGEventTap` on a dedicated thread with its own runloop |
+| `AudioRecorder` | `AVAudioEngine` → 16 kHz mono PCM, 300 ms floor |
+| `Transcriber` | `whisper-cli` subprocess, launch warm-up |
+| `Cleanup/` | one `Cleaner` protocol; Ollama and OpenAI-compatible backends |
+| `TextInserter` | pasteboard save/restore, synthetic ⌘V, secure-input guard |
+| `DictationController` | the job pipeline and its sequence gate |
+| `PillWindow` / `PillView` | non-activating status indicator |
+
+Two design choices worth calling out:
+
+**The event tap never stalls.** It runs on its own thread with its own runloop, is listen-only, and
+its callback does nothing but classify and signal — measured p99 of 1.5–4.7 µs against a 100 µs
+budget. Almost every reported `tapDisabledByTimeout` in apps of this kind comes from putting the tap
+on the main runloop. The re-arm handler is kept as an alarm that something regressed, not as the
+mitigation.
+
+**Insertion is serialised by sequence number.** Press the hotkey while a previous dictation is still
+transcribing and it starts a *new* recording immediately — nothing is queued, ignored, or dropped.
+Jobs run concurrently, but text always lands in the order you spoke it.
+
+---
+
+## Known limitations
+
+Stated plainly rather than buried.
+
+- **Voice editing is built but not wired.** `VoiceEdit.swift` rewrites a selection from a spoken
+  instruction and is tested, but no second hotkey triggers it. It needs an `editHotkey` setting and
+  a second monitor.
+- **The pill's input meter always reads zero.** `AudioRecorder` doesn't publish a level yet. Its
+  *states* are real; only the bars are cosmetic.
+- **Launch at login is unverified.** The menu toggle calls `SMAppService`, but registration has
+  never succeeded from a non-`/Applications`, unnotarized bundle.
+- **Secure input blocks everything, correctly.** In a password field — or when a stale
+  `loginwindow` state leaves the flag stuck on — Sotto refuses with a red pill. Diagnose with
+  `ioreg -l -w 0 | grep kCGSSessionSecureInputPID`; a logout or reboot clears a stuck one.
+- **English only.** The `.en` models are chosen deliberately: they beat multilingual models at equal
+  size.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Hotkey does nothing | Input Monitoring missing | grant it, then **relaunch** |
+| Transcribes but never pastes | Accessibility missing | grant it, then relaunch |
+| Every dictation refuses instantly | mic denied, or entitlement missing | `tccutil reset Microphone com.hakeem.sotto`, relaunch |
+| Red pill, nothing inserts | secure input active | leave the password field; reboot if stuck |
+| Amber pill, raw text pasted | Ollama unreachable | `ollama serve` |
+| Worked, then stopped | ad-hoc signature | `codesign -dr - Sotto.app`, rebuild |
+| `build.sh` seems to hang | keychain dialog waiting | click **Always Allow** |
+| Tests "pass" but nothing ran | used `swift test` | use `./test.sh` |
+
+## License
+
+MIT
