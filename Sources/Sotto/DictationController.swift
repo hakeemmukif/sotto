@@ -120,6 +120,7 @@ final class DictationController: @unchecked Sendable {
     private let insert: @Sendable (String, InsertionPermit) throws -> Void
     private let isMicrophoneAuthorized: @Sendable () -> Bool
     private let onStateChange: @Sendable (Int, DictationState) -> Void
+    private let recordHistory: @Sendable (String) -> Void
 
     private let jobQueue = DispatchQueue(label: "com.hakeem.sotto.jobs", attributes: .concurrent)
     private let insertionQueue = DispatchQueue(label: "com.hakeem.sotto.insertion")
@@ -140,7 +141,8 @@ final class DictationController: @unchecked Sendable {
         permitInsertion: @escaping @Sendable () throws -> InsertionPermit,
         insert: @escaping @Sendable (String, InsertionPermit) throws -> Void,
         isMicrophoneAuthorized: @escaping @Sendable () -> Bool,
-        onStateChange: @escaping @Sendable (Int, DictationState) -> Void
+        onStateChange: @escaping @Sendable (Int, DictationState) -> Void,
+        recordHistory: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.hotkey = hotkey
         self.startRecording = startRecording
@@ -151,11 +153,13 @@ final class DictationController: @unchecked Sendable {
         self.insert = insert
         self.isMicrophoneAuthorized = isMicrophoneAuthorized
         self.onStateChange = onStateChange
+        self.recordHistory = recordHistory
     }
 
     convenience init(
         settings: Settings,
         whisperBinaryPath: String,
+        history: History = History(),
         onStateChange: @escaping @Sendable (Int, DictationState) -> Void
     ) throws {
         guard settings.whisperBackend == .local else {
@@ -185,7 +189,8 @@ final class DictationController: @unchecked Sendable {
             permitInsertion: { try inserter.permitInsertion() },
             insert: { try inserter.insert($0, permit: $1) },
             isMicrophoneAuthorized: { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized },
-            onStateChange: onStateChange
+            onStateChange: onStateChange,
+            recordHistory: { history.insert($0) }
         )
     }
 
@@ -349,6 +354,7 @@ final class DictationController: @unchecked Sendable {
             onStateChange(sequence, .inserting)
             do {
                 try insert(text, permit)
+                recordHistory(text)
                 onStateChange(sequence, raw ? .backendUnavailable : .done)
             } catch InsertionError.secureInputActive {
                 onStateChange(sequence, .secureInputActive)
