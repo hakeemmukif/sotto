@@ -65,6 +65,14 @@ extension Hotkey {
             self = .fn
             return
         }
+        // A lone modifier is held like `fn`, for keyboards without an fn key. Checked before the
+        // chord path, where a single modifier name would otherwise read as a missing key.
+        // `!contains("+")` matters: `split` drops the empty tail of "ctrl+", which would otherwise
+        // read as a bare modifier when the user plainly meant an unfinished chord.
+        if !settingsValue.contains("+"), parts.count == 1, let flag = Hotkey.modifierFlags[parts[0]] {
+            self = .modifier(flag)
+            return
+        }
         guard let keyName = parts.last, let keyCode = Hotkey.keyCodes[keyName] else {
             throw DictationError.unparseableHotkey(settingsValue)
         }

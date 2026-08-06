@@ -176,6 +176,22 @@ struct HotkeyGrammarTests {
         #expect(try Hotkey(settingsValue: "FN") == .fn)
     }
 
+    // A bare modifier is held the way `fn` is, for keyboards with no fn key of their own.
+    @Test func aBareModifierParsesAsAHeldModifier() throws {
+        #expect(try Hotkey(settingsValue: "ctrl") == .modifier(.maskControl))
+        #expect(try Hotkey(settingsValue: "CTRL") == .modifier(.maskControl))
+        #expect(try Hotkey(settingsValue: "cmd") == .modifier(.maskCommand))
+        #expect(try Hotkey(settingsValue: "opt") == .modifier(.maskAlternate))
+        #expect(try Hotkey(settingsValue: "shift") == .modifier(.maskShift))
+    }
+
+    @Test func aBareModifierStillLeavesChordsAndGarbageAlone() throws {
+        #expect(try Hotkey(settingsValue: "ctrl+space") != .modifier(.maskControl))
+        #expect(throws: DictationError.unparseableHotkey("banana")) {
+            try Hotkey(settingsValue: "banana")
+        }
+    }
+
     @Test func aChordParsesToItsKeycodeAndModifiers() throws {
         #expect(try Hotkey(settingsValue: "ctrl+space") == .chord(keyCode: Int64(kVK_Space), modifiers: .maskControl))
         #expect(

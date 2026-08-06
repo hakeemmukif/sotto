@@ -4,6 +4,7 @@ import os
 
 enum Hotkey: Equatable {
     case fn
+    case modifier(CGEventFlags)
     case chord(keyCode: Int64, modifiers: CGEventFlags)
 }
 
@@ -41,6 +42,9 @@ struct HotkeyClassifier {
         case .fn:
             guard type == .flagsChanged else { return nil }
             held = flags.contains(.maskSecondaryFn)
+        case let .modifier(flag):
+            guard type == .flagsChanged else { return nil }
+            held = flags.contains(flag)
         case let .chord(code, modifiers):
             guard keyCode == code else { return nil }
             if type == .keyDown {

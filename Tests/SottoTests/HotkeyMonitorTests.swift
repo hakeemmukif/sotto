@@ -69,6 +69,15 @@ private let spaceKeyCode: Int64 = 49
 
 @Suite("Hotkey classification — pure, no event tap required")
 struct HotkeyClassifierTests {
+    @Test func aHeldControlKeyProducesExactlyOneStartAndOneStop() {
+        var classifier = HotkeyClassifier(hotkey: .modifier(.maskControl))
+
+        #expect(classifier.classify(type: .flagsChanged, flags: .maskControl, keyCode: 0) == .start)
+        #expect(classifier.classify(type: .flagsChanged, flags: [.maskControl, .maskShift], keyCode: 0) == nil)
+        #expect(classifier.classify(type: .flagsChanged, flags: [], keyCode: 0) == .stop)
+        #expect(classifier.classify(type: .keyDown, flags: .maskControl, keyCode: 8) == nil)
+    }
+
     @Test func fnHoldProducesExactlyOneStartAndOneStop() {
         var classifier = HotkeyClassifier(hotkey: .fn)
 
