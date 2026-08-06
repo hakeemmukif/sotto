@@ -6,6 +6,23 @@ enum PillState: Equatable {
     case cleaning
     case pastedRaw
     case secureInput
+    case failed(String)
+
+    /// The pipeline emits per-job truth; deciding what the user sees is this layer's job. `nil` means
+    /// the pill hides. Every error state maps to something visible — the acceptance criterion is that
+    /// no failure anywhere results in nothing happening on screen.
+    init?(_ state: DictationState) {
+        switch state {
+        case .recording: self = .recording(level: 0)
+        case .transcribing: self = .transcribing
+        case .cleaning, .inserting: self = .cleaning
+        case .done, .cancelled: return nil
+        case .secureInputActive: self = .secureInput
+        case .backendUnavailable: self = .pastedRaw
+        case let .permissionMissing(what): self = .failed(what)
+        case let .failed(reason): self = .failed(reason)
+        }
+    }
 }
 
 // Status never travels on colour alone: every state carries a label, and the two failure states say
@@ -18,6 +35,7 @@ extension PillState {
         case .cleaning: "Cleaning"
         case .pastedRaw: "Pasted raw — cleanup unavailable"
         case .secureInput: "Secure input — cannot insert"
+        case let .failed(reason): reason
         }
     }
 
@@ -26,7 +44,7 @@ extension PillState {
         case .recording: .systemTeal
         case .transcribing, .cleaning: .secondaryLabelColor
         case .pastedRaw: .systemOrange
-        case .secureInput: .systemRed
+        case .secureInput, .failed: .systemRed
         }
     }
 }

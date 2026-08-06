@@ -47,6 +47,17 @@ struct PillWindowTests {
         #expect(pill.panel.isVisible == false)
     }
 
+    // No pipeline failure may be invisible — that is task 13's acceptance criterion, enforced here.
+    @Test func everyFailureStateReachesTheScreen() {
+        #expect(PillState(.secureInputActive) == .secureInput)
+        #expect(PillState(.backendUnavailable) == .pastedRaw)
+        #expect(PillState(.permissionMissing("Microphone")) == .failed("Microphone"))
+        #expect(PillState(.failed("boom")) == .failed("boom"))
+
+        #expect(PillState(.done) == nil)
+        #expect(PillState(.cancelled) == nil)
+    }
+
     // Absence renders as absence: a caret-less app gets a defined placement, not a hidden pill.
     @Test func aCaretlessAppStillGetsAVisiblePlacement() {
         let screen = NSRect(x: 0, y: 0, width: 2560, height: 1440)
