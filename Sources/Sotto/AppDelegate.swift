@@ -1,5 +1,6 @@
 import AVFoundation
 import AppKit
+import ApplicationServices
 import ServiceManagement
 
 private struct LaunchFailure: Error, CustomStringConvertible {
@@ -12,6 +13,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Homebrew's whisper-cpp location. Not a settings key: the settings file names the *model*, which
     // is the thing a user changes. A missing binary throws from Transcriber naming this path.
     private static let whisperBinaryPath = "/opt/homebrew/bin/whisper-cli"
+
+    static let diagnosticsPath = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/Sotto.log")
+
+    static func diagnose(_ message: String) {
+        NSLog("Sotto: \(message)")
+        let line = "\(Date()) \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: diagnosticsPath) {
+            defer { try? handle.close() }
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: diagnosticsPath)
+        }
+    }
 
     private var statusItem: NSStatusItem?
     private var controller: DictationController?
@@ -63,10 +80,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.controller = controller
 
+            // Written to a file, not just NSLog: the only launch whose TCC attribution is correct is
+            // one via LaunchServices, and that launch has no terminal to print to.
+            Self.diagnose("preflight — listenEvent=\(CGPreflightListenEventAccess()) axTrusted=\(AXIsProcessTrusted()) mic=\(AVCaptureDevice.authorizationStatus(for: .audio).rawValue)")
+
             var launchError: String?
             do {
                 try controller.startListening(onAlarm: onAlarm)
+                Self.diagnose("startListening succeeded — hotkey \(settings.hotkey) is live")
             } catch {
+                Self.diagnose("startListening FAILED — \(error)")
                 // A launch failure is never silent: it reaches the menu and the pill.
                 launchError = "\(error)"
                 pill.show(.failed("\(error)"))
