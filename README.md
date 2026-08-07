@@ -11,7 +11,7 @@ hold ctrl ──▶ record ──▶ whisper.cpp ──▶ Ollama cleanup ──
                           ~0.9 s           ~0.75 s            clipboard restored
 ```
 
-> **Scope.** This was built to run on one machine — an M5 Pro on macOS 26. It is signed with a
+> **Scope.** This was built to run on one machine — an Apple silicon Mac on macOS 26. It is signed with a
 > self-signed certificate and is not notarized. You can build and run it, but expect to do the
 > permissions dance below. It is not a product.
 
@@ -33,7 +33,7 @@ hold ctrl ──▶ record ──▶ whisper.cpp ──▶ Ollama cleanup ──
 
 ## Measured performance
 
-On an M5 Pro, against a 9.33 s clip. These numbers drove the design, not the other way round.
+Against a 9.33 s clip. These numbers drove the design, not the other way round.
 
 | Stage | Cold | Warm |
 |---|---|---|

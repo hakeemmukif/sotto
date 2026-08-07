@@ -14,7 +14,7 @@ previous clipboard afterwards.
 was empirically decidable, measured on this machine rather than assumed. The measurements are in
 "Measured facts" and they are the reason several obvious-looking designs were rejected.
 
-**Destination.** Sotto runs on *this* Mac — Apple M5 Pro, 24 GB, macOS 26.5.1. Not distributed,
+**Destination.** Sotto runs on *this* Mac — Apple silicon, 24 GB, macOS 26.5.1. Not distributed,
 not notarized, no accounts, no telemetry. Done means: hold the hotkey in any app, speak, release,
 and clean text appears.
 
@@ -57,7 +57,7 @@ Three consequences:
 
 Environment, verified:
 
-- macOS 26.5.1, Apple M5 Pro, 24 GB, arm64.
+- macOS 26.5.1, Apple silicon, 24 GB, arm64.
 - Swift 6.3.2 via Command Line Tools. **No Xcode.** AppKit, SwiftUI, AVFoundation,
   ServiceManagement, ApplicationServices and the `CGEvent` tap APIs all compile and link.
 - `whisper-cli` at `/opt/homebrew/bin/whisper-cli` (Homebrew `whisper-cpp`).
