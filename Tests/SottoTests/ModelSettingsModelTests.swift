@@ -216,6 +216,22 @@ struct ModelSettingsModelTests {
         #expect(model.verdict(for: "qwen3:4b") == .notRun)
     }
 
+    // A verdict of PASS with no visible output is just a number. The automated checks catch a model
+    // that answers the fixture or rambles, but only the user can judge whether their meaning
+    // survived, and they need the model's actual words to do it.
+    @Test func aPassingProbeKeepsWhatTheModelActuallyWrote() async {
+        let model = makeModel(spy: Spy(running: "qwen2.5:3b-instruct"))
+
+        await model.test(model: "qwen2.5:3b-instruct")
+
+        guard case let .result(result, _) = model.verdict(for: "qwen2.5:3b-instruct") else {
+            Issue.record("expected .result, got \(model.verdict(for: "qwen2.5:3b-instruct"))")
+            return
+        }
+        #expect(result.output != nil)
+        #expect(result.output?.isEmpty == false)
+    }
+
     @Test func testingASelectedModelNeitherWritesTheFileNorSwapsTheSlot() async {
         let spy = Spy(running: "qwen2.5:3b-instruct")
         let model = makeModel(spy: spy)

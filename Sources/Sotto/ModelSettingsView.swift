@@ -380,6 +380,9 @@ struct ModelSettingsView: View {
         case let .failed(reason, _):
             return Self.truncated(reason)
         case let .result(result, _):
+            // Shown for a pass as much as a failure: the point of Test is to read what the model did
+            // to the sentence, and a verdict of PASS with no visible output is just a number.
+            if let output = result.output { return Self.truncated(output) }
             guard case let .fail(reason) = result.verdict else { return nil }
             return Self.truncated(reason)
         }

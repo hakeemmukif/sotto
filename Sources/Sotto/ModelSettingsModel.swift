@@ -21,6 +21,11 @@ struct ProbeResult: Equatable {
     let elapsed: TimeInterval
     let warm: Bool
     let remedy: String?
+    /// Exactly what the model wrote, when it wrote anything. The automated checks catch the two
+    /// catastrophic classes — a model that answers the fixture's question, and one that rambles —
+    /// but whether the cleanup preserved the user's meaning is a judgement only they can make, and
+    /// they cannot make it against a latency number. Nil when the call threw before producing text.
+    let output: String?
 }
 
 /// Backs the settings panel's model tab: what Ollama reports, what settings.json names, what this
@@ -186,7 +191,8 @@ final class ModelSettingsModel: ObservableObject {
                     verdict: CleanupProbe.verdict(output: output, error: nil, elapsed: elapsed, warm: warm),
                     elapsed: elapsed,
                     warm: warm,
-                    remedy: nil
+                    remedy: nil,
+                    output: output
                 ),
                 checkedAt: finished
             )
@@ -198,7 +204,8 @@ final class ModelSettingsModel: ObservableObject {
                     verdict: CleanupProbe.verdict(output: nil, error: error, elapsed: elapsed, warm: warm),
                     elapsed: elapsed,
                     warm: warm,
-                    remedy: CleanupProbe.remedy(for: error, elapsed: elapsed)
+                    remedy: CleanupProbe.remedy(for: error, elapsed: elapsed),
+                    output: nil
                 ),
                 checkedAt: finished
             )
