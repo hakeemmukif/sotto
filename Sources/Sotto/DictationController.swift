@@ -11,7 +11,7 @@ enum DictationError: Error, Equatable, CustomStringConvertible {
     var description: String {
         switch self {
         case let .unparseableHotkey(value):
-            "settings.json has hotkey \"\(value)\". Write \"fn\", or a chord such as \"ctrl+space\" built from cmd/ctrl/opt/shift and one of space, escape, f13–f19."
+            "settings.json has hotkey \"\(value)\". Write \"fn\", a modifier combination such as \"ctrl+opt+cmd\", or a chord such as \"ctrl+space\" built from cmd/ctrl/opt/shift and one of space, escape, f13–f19."
         case let .unsupportedWhisperBackend(value):
             "settings.json has whisperBackend \"\(value)\". Sotto transcribes locally through whisper-cli; set it to \"local\"."
         }
@@ -27,6 +27,9 @@ enum DictationState: Equatable, Sendable {
     case inserting
     case done
     case cancelled
+    // Escape during a hold. The audio is discarded before transcription, so this is a user decision
+    // rather than a failure, and the pill hides just as it does for .done.
+    case aborted
     case secureInputActive
     // Decision 3a, the only sanctioned degradation: the cleanup backend was unreachable, the raw
     // transcript was inserted anyway, and the pill goes amber.
@@ -56,21 +59,21 @@ extension Hotkey {
     ]
 
     init(settingsValue: String) throws {
+        // omittingEmptySubsequences: false so "ctrl+" keeps its empty tail and fails parsing
+        // instead of reading as a bare modifier when the user plainly meant an unfinished chord.
         let parts = settingsValue
             .lowercased()
-            .split(separator: "+")
+            .split(separator: "+", omittingEmptySubsequences: false)
             .map { $0.trimmingCharacters(in: .whitespaces) }
 
         if parts == ["fn"] {
             self = .fn
             return
         }
-        // A lone modifier is held like `fn`, for keyboards without an fn key. Checked before the
-        // chord path, where a single modifier name would otherwise read as a missing key.
-        // `!contains("+")` matters: `split` drops the empty tail of "ctrl+", which would otherwise
-        // read as a bare modifier when the user plainly meant an unfinished chord.
-        if !settingsValue.contains("+"), parts.count == 1, let flag = Hotkey.modifierFlags[parts[0]] {
-            self = .modifier(flag)
+        // Modifiers only — held like `fn`, for keyboards without an fn key. Checked before the
+        // chord path, where modifier names alone would otherwise read as a missing key.
+        if !parts.isEmpty, parts.allSatisfy({ Hotkey.modifierFlags[$0] != nil }) {
+            self = .modifier(CGEventFlags(parts.compactMap { Hotkey.modifierFlags[$0] }))
             return
         }
         guard let keyName = parts.last, let keyCode = Hotkey.keyCodes[keyName] else {
@@ -114,8 +117,17 @@ private struct ProfiledCleaner: Cleaner {
 /// partition the rest: `jobQueue` runs transcription and cleanup concurrently, `insertionQueue` is
 /// serial so only one insertion is ever in flight.
 final class DictationController: @unchecked Sendable {
+    /// What the dictation produced, beside the text that gets inserted. Carried through the
+    /// insertion queue so the history record describes the dictation, not the moment it landed.
+    private struct Origin {
+        let transcript: String
+        let startedAt: Date
+        let durationMs: Int
+        let bundleID: String?
+    }
+
     private enum Insertion {
-        case text(String, permit: InsertionPermit, raw: Bool)
+        case text(String, permit: InsertionPermit, raw: Bool, origin: Origin)
         case nothing
     }
 
@@ -128,14 +140,15 @@ final class DictationController: @unchecked Sendable {
     private let insert: @Sendable (String, InsertionPermit) throws -> Void
     private let isMicrophoneAuthorized: @Sendable () -> Bool
     private let onStateChange: @Sendable (Int, DictationState) -> Void
-    private let recordHistory: @Sendable (String) -> Void
+    private let frontmostBundleID: @Sendable () -> String?
+    private let recordHistory: @Sendable (DictationRecord) -> Void
 
     private let jobQueue = DispatchQueue(label: "com.hakeem.sotto.jobs", attributes: .concurrent)
     private let insertionQueue = DispatchQueue(label: "com.hakeem.sotto.insertion")
 
     private let lock = NSLock()
     private var nextSequence = 1
-    private var holding: (sequence: Int, permit: InsertionPermit)?
+    private var holding: (sequence: Int, permit: InsertionPermit, startedAt: Date, bundleID: String?)?
     private var pending: [Int: Insertion] = [:]
     private var nextToInsert = 1
     private var monitor: HotkeyMonitor?
@@ -150,7 +163,8 @@ final class DictationController: @unchecked Sendable {
         insert: @escaping @Sendable (String, InsertionPermit) throws -> Void,
         isMicrophoneAuthorized: @escaping @Sendable () -> Bool,
         onStateChange: @escaping @Sendable (Int, DictationState) -> Void,
-        recordHistory: @escaping @Sendable (String) -> Void = { _ in }
+        frontmostBundleID: @escaping @Sendable () -> String? = { nil },
+        recordHistory: @escaping @Sendable (DictationRecord) -> Void = { _ in }
     ) {
         self.hotkey = hotkey
         self.startRecording = startRecording
@@ -161,6 +175,7 @@ final class DictationController: @unchecked Sendable {
         self.insert = insert
         self.isMicrophoneAuthorized = isMicrophoneAuthorized
         self.onStateChange = onStateChange
+        self.frontmostBundleID = frontmostBundleID
         self.recordHistory = recordHistory
     }
 
@@ -168,6 +183,7 @@ final class DictationController: @unchecked Sendable {
         settings: Settings,
         whisperBinaryPath: String,
         history: History = History(),
+        store: HistoryStore? = nil,
         onStateChange: @escaping @Sendable (Int, DictationState) -> Void
     ) throws {
         guard settings.whisperBackend == .local else {
@@ -198,7 +214,12 @@ final class DictationController: @unchecked Sendable {
             insert: { try inserter.insert($0, permit: $1) },
             isMicrophoneAuthorized: { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized },
             onStateChange: onStateChange,
-            recordHistory: { history.insert($0) }
+            frontmostBundleID: { NSWorkspace.shared.frontmostApplication?.bundleIdentifier },
+            // The ring buffer still backs the menu. The store is what survives a quit.
+            recordHistory: { record in
+                history.insert(record.cleaned)
+                store?.append(record)
+            }
         )
     }
 
@@ -241,6 +262,7 @@ final class DictationController: @unchecked Sendable {
         switch event {
         case .start: beginRecording()
         case .stop: finishRecording()
+        case .abort: abortRecording()
         }
     }
 
@@ -271,7 +293,7 @@ final class DictationController: @unchecked Sendable {
             }
             try startRecording()
             lock.lock()
-            holding = (sequence, permit)
+            holding = (sequence, permit, Date(), frontmostBundleID())
             lock.unlock()
             onStateChange(sequence, .recording)
         } catch InsertionError.secureInputActive {
@@ -288,7 +310,7 @@ final class DictationController: @unchecked Sendable {
         let job = holding
         holding = nil
         lock.unlock()
-        guard let (sequence, permit) = job else { return }
+        guard let (sequence, permit, startedAt, bundleID) = job else { return }
 
         do {
             guard let wav = try stopRecording() else {
@@ -296,15 +318,44 @@ final class DictationController: @unchecked Sendable {
                 deposit(sequence, .nothing)
                 return
             }
+            // Measured here, not at insertion: WPM must describe how fast the user spoke, and
+            // transcription plus cleanup add seconds that have nothing to do with speaking.
+            let durationMs = Int(Date().timeIntervalSince(startedAt) * 1000)
             onStateChange(sequence, .transcribing)
-            jobQueue.async { [self] in run(sequence: sequence, permit: permit, wav: wav) }
+            jobQueue.async { [self] in
+                run(
+                    sequence: sequence, permit: permit, wav: wav,
+                    startedAt: startedAt, durationMs: durationMs, bundleID: bundleID
+                )
+            }
         } catch {
             onStateChange(sequence, .failed("\(error)"))
             deposit(sequence, .nothing)
         }
     }
 
-    private func run(sequence: Int, permit: InsertionPermit, wav: URL) {
+    private func abortRecording() {
+        lock.lock()
+        let job = holding
+        holding = nil
+        lock.unlock()
+        guard let (sequence, _, _, _) = job else { return }
+
+        // Stop the mic and throw the audio away. `stopRecording()` can return nil (a clip under
+        // AudioRecorder.minimumDuration) or throw; neither changes the outcome, because nothing is
+        // transcribed either way. `run()` normally deletes the wav in its `defer` and never runs on
+        // this path, so the delete happens here or the temp file leaks.
+        let wav = try? stopRecording()
+        if let wav { try? FileManager.default.removeItem(at: wav) }
+
+        onStateChange(sequence, .aborted)
+        deposit(sequence, .nothing)
+    }
+
+    private func run(
+        sequence: Int, permit: InsertionPermit, wav: URL,
+        startedAt: Date, durationMs: Int, bundleID: String?
+    ) {
         let transcript: String
         do {
             defer { try? FileManager.default.removeItem(at: wav) }
@@ -315,8 +366,12 @@ final class DictationController: @unchecked Sendable {
             return
         }
 
+        let origin = Origin(
+            transcript: transcript, startedAt: startedAt, durationMs: durationMs, bundleID: bundleID
+        )
+
         guard let cleaner else {
-            deposit(sequence, .text(transcript, permit: permit, raw: false))
+            deposit(sequence, .text(transcript, permit: permit, raw: false, origin: origin))
             return
         }
 
@@ -324,9 +379,9 @@ final class DictationController: @unchecked Sendable {
         Task { [self] in
             do {
                 let cleaned = try await cleaner.clean(transcript, system: Prompts.cleanup)
-                deposit(sequence, .text(cleaned, permit: permit, raw: false))
+                deposit(sequence, .text(cleaned, permit: permit, raw: false, origin: origin))
             } catch CleanupError.backendUnavailable {
-                deposit(sequence, .text(transcript, permit: permit, raw: true))
+                deposit(sequence, .text(transcript, permit: permit, raw: true, origin: origin))
             } catch {
                 onStateChange(sequence, .failed("\(error)"))
                 deposit(sequence, .nothing)
@@ -357,12 +412,19 @@ final class DictationController: @unchecked Sendable {
             nextToInsert += 1
             lock.unlock()
 
-            guard case let .text(text, permit, raw) = insertion else { continue }
+            guard case let .text(text, permit, raw, origin) = insertion else { continue }
 
             onStateChange(sequence, .inserting)
             do {
                 try insert(text, permit)
-                recordHistory(text)
+                recordHistory(DictationRecord(
+                    id: UUID(),
+                    timestamp: origin.startedAt,
+                    raw: origin.transcript,
+                    cleaned: text,
+                    bundleID: origin.bundleID,
+                    durationMs: origin.durationMs
+                ))
                 onStateChange(sequence, raw ? .backendUnavailable : .done)
             } catch InsertionError.secureInputActive {
                 onStateChange(sequence, .secureInputActive)

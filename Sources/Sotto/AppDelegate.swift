@@ -35,8 +35,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarController?
     private let pill = PillWindow()
     private let history = History()
+    private let store = HistoryStore()
+    private var historyWindow: HistoryWindowController?
+    private var hotkeyLabel: String?
+    private var cleaner: Cleaner?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppPresence.install()
+
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Sotto")
         statusItem = item
@@ -64,6 +70,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             let settings = try Settings.load()
+            hotkeyLabel = settings.hotkey
+            // The same backend the cleanup pass uses. Enhance is a second prompt over one client,
+            // not a second provider to configure.
+            cleaner = try? DictationController.cleaner(for: settings)
             // Measured 8.44 s cold against 0.91 s warm: without this the first dictation after a
             // reboot takes eight seconds. Off the main thread, or it delays launch by exactly that.
             let transcriber = Transcriber(binaryPath: Self.whisperBinaryPath, modelPath: settings.whisperModelPath)
@@ -76,10 +86,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             warmUp()
 
+            // Once per launch, not per dictation: the trim rewrites the whole file.
+            store.trim(now: Date())
+
             let controller = try DictationController(
                 settings: settings,
                 whisperBinaryPath: Self.whisperBinaryPath,
-                history: history
+                history: history,
+                store: store
             ) { [pill] sequence, state in
                 Self.diagnose("job \(sequence) → \(state)")
                 DispatchQueue.main.async {
@@ -118,7 +132,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 registerLoginItem: { try SMAppService.mainApp.register() },
                 unregisterLoginItem: { try await SMAppService.mainApp.unregister() },
                 loginItemStatus: { SMAppService.mainApp.status },
-                copyToPasteboard: copyToPasteboard
+                copyToPasteboard: copyToPasteboard,
+                showHistory: { [weak self] in self?.showHistory() }
             )
         } catch {
             let message = "\(error)"
@@ -133,9 +148,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 registerLoginItem: { try SMAppService.mainApp.register() },
                 unregisterLoginItem: { try await SMAppService.mainApp.unregister() },
                 loginItemStatus: { SMAppService.mainApp.status },
-                copyToPasteboard: copyToPasteboard
+                copyToPasteboard: copyToPasteboard,
+                showHistory: { [weak self] in self?.showHistory() }
             )
             pill.show(.failed(message))
         }
+    }
+
+    private func showHistory() {
+        let controller = historyWindow ?? HistoryWindowController(store: store, hotkeyLabel: hotkeyLabel, cleaner: cleaner)
+        historyWindow = controller
+        controller.show()
+    }
+
+    /// Sotto has no Dock icon, so relaunching it from Spotlight or Finder reactivates the running
+    /// process instead of starting a second one. Without this the Return key appears to do nothing.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        showHistory()
+        return true
     }
 }

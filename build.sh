@@ -17,13 +17,14 @@ mkdir -p "$BUNDLE/Contents/Resources"
 
 cp "$BIN_PATH" "$BUNDLE/Contents/MacOS/$APP_NAME"
 cp Resources/Info.plist "$BUNDLE/Contents/Info.plist"
+cp Resources/Sotto.icns "$BUNDLE/Contents/Resources/Sotto.icns"
 
 codesign -f -s "$IDENTITY" --options runtime --entitlements Resources/Sotto.entitlements "$BUNDLE"
 
 DR="$(codesign -dr - "$BUNDLE")"
 echo "$DR"
 
-if ! echo "$DR" | grep -q 'certificate root = H"a22ef0b5e30d5b9650c2b0db015badb15e924a7c"'; then
+if ! echo "$DR" | grep -q 'certificate leaf = H"f8597f841d13b056d65c62c81db433aa524c688a"'; then
     echo "error: designated requirement does not match Sotto Dev identity" >&2
     exit 1
 fi

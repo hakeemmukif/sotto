@@ -154,7 +154,7 @@ codebase is built on.
 
 | Key | Values |
 |---|---|
-| `hotkey` | `"fn"`, a bare modifier (`"ctrl"`, `"cmd"`, `"opt"`, `"shift"`), or a chord (`"ctrl+space"`, `"cmd+shift+f13"`) |
+| `hotkey` | `"fn"`, a bare modifier (`"ctrl"`, `"cmd"`, `"opt"`, `"shift"`), a modifier combination (`"ctrl+opt+cmd"`), or a chord (`"ctrl+space"`, `"cmd+shift+f13"`) |
 | `whisperModelPath` | path to a `ggml-*.bin`; `~` is expanded |
 | `whisperBackend` | `local` |
 | `cleanupBackend` | `ollama`, `groq`, `openai`, or `none` |

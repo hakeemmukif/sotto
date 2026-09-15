@@ -66,6 +66,7 @@ private func makeMonitor(_ hotkey: Hotkey, _ log: DeliveryLog) -> HotkeyMonitor 
 private let fnKeyCode: Int64 = 63
 private let shiftKeyCode: Int64 = 56
 private let spaceKeyCode: Int64 = 49
+private let escapeKeyCode: Int64 = 53
 
 @Suite("Hotkey classification — pure, no event tap required")
 struct HotkeyClassifierTests {
@@ -103,6 +104,43 @@ struct HotkeyClassifierTests {
         #expect(classifier.classify(type: .keyDown, flags: [.maskControl], keyCode: spaceKeyCode) == nil)
         #expect(classifier.classify(type: .keyDown, flags: [.maskControl], keyCode: 48) == nil)
         #expect(classifier.classify(type: .keyUp, flags: [.maskControl], keyCode: spaceKeyCode) == .stop)
+    }
+
+    @Test func escapeMidHoldAbortsAndSwallowsTheRelease() {
+        var classifier = HotkeyClassifier(hotkey: .modifier(.maskAlternate))
+
+        #expect(classifier.classify(type: .flagsChanged, flags: .maskAlternate, keyCode: 0) == .start)
+        #expect(classifier.classify(type: .keyDown, flags: .maskAlternate, keyCode: escapeKeyCode) == .abort)
+        // The regression guard: the abort already ended the hold, so releasing the physical key
+        // must not deliver a second, phantom .stop to the controller.
+        #expect(classifier.classify(type: .flagsChanged, flags: [], keyCode: 0) == nil)
+        #expect(classifier.classify(type: .flagsChanged, flags: .maskAlternate, keyCode: 0) == .start)
+    }
+
+    @Test func escapeOutsideAHoldIsIgnored() {
+        var classifier = HotkeyClassifier(hotkey: .modifier(.maskAlternate))
+
+        #expect(classifier.classify(type: .keyDown, flags: [], keyCode: escapeKeyCode) == nil)
+        #expect(classifier.classify(type: .keyUp, flags: [], keyCode: escapeKeyCode) == nil)
+    }
+
+    @Test func escapeMidHoldAbortsAnFnHold() {
+        var classifier = HotkeyClassifier(hotkey: .fn)
+
+        #expect(classifier.classify(type: .flagsChanged, flags: [.maskSecondaryFn], keyCode: fnKeyCode) == .start)
+        #expect(classifier.classify(type: .keyDown, flags: [.maskSecondaryFn], keyCode: escapeKeyCode) == .abort)
+        #expect(classifier.classify(type: .flagsChanged, flags: [], keyCode: fnKeyCode) == nil)
+    }
+
+    // Escape carries neither the chord's keyCode nor its modifier, so this only passes while the
+    // abort check sits ahead of the chord's `guard keyCode == code`.
+    @Test func escapeMidHoldAbortsAChordHold() {
+        var classifier = HotkeyClassifier(hotkey: .chord(keyCode: spaceKeyCode, modifiers: .maskControl))
+
+        #expect(classifier.classify(type: .keyDown, flags: [.maskControl], keyCode: spaceKeyCode) == .start)
+        #expect(classifier.classify(type: .keyDown, flags: [.maskControl], keyCode: escapeKeyCode) == .abort)
+        #expect(classifier.classify(type: .keyUp, flags: [.maskControl], keyCode: spaceKeyCode) == nil)
+        #expect(classifier.classify(type: .keyDown, flags: [.maskControl], keyCode: spaceKeyCode) == .start)
     }
 
     @Test func chordWithoutItsModifierNeverStarts() {

@@ -11,6 +11,7 @@ enum Hotkey: Equatable {
 enum HotkeyEvent: Equatable {
     case start
     case stop
+    case abort
 }
 
 enum HotkeyAlarm: Equatable {
@@ -29,6 +30,9 @@ enum HotkeyMonitorError: Error, Equatable, CustomStringConvertible {
 }
 
 struct HotkeyClassifier {
+    /// kVK_Escape. Spelled out rather than imported so this file stays free of Carbon.
+    private static let escapeKeyCode: Int64 = 53
+
     private let hotkey: Hotkey
     private var isHeld = false
 
@@ -37,6 +41,15 @@ struct HotkeyClassifier {
     }
 
     mutating func classify(type: CGEventType, flags: CGEventFlags, keyCode: Int64) -> HotkeyEvent? {
+        // Ahead of the `switch hotkey`, because every branch there would throw an Escape keyDown
+        // away: .fn and .modifier demand .flagsChanged, and .chord demands its own keyCode.
+        // Clearing isHeld here matters as much as the return value — the later release of the
+        // physical hotkey then hits `held != isHeld` as a no-op, so no phantom .stop follows.
+        if isHeld, type == .keyDown, keyCode == HotkeyClassifier.escapeKeyCode {
+            isHeld = false
+            return .abort
+        }
+
         let held: Bool
         switch hotkey {
         case .fn:

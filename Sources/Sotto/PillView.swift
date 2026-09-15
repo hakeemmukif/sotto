@@ -16,7 +16,7 @@ enum PillState: Equatable {
         case .recording: self = .recording(level: 0)
         case .transcribing: self = .transcribing
         case .cleaning, .inserting: self = .cleaning
-        case .done, .cancelled: return nil
+        case .done, .cancelled, .aborted: return nil
         case .secureInputActive: self = .secureInput
         case .backendUnavailable: self = .pastedRaw
         case let .permissionMissing(what): self = .failed(what)

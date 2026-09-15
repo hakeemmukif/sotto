@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleExecutable</key>
 	<string>Sotto</string>
+	<key>CFBundleIconFile</key>
+	<string>Sotto</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.hakeem.sotto</string>
 	<key>CFBundleName</key>
@@ -14,8 +16,6 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>LSUIElement</key>
-	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Sotto transcribes your speech locally when you hold the dictation hotkey.</string>
 	<key>NSHighResolutionCapable</key>
