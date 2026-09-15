@@ -43,6 +43,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppPresence.install()
 
+        // A click on a terminal pill already hides it; opening the destination is task 19.
+        pill.onActivate = { _ in }
+
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Sotto")
         statusItem = item
@@ -120,7 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Self.diagnose("startListening FAILED — \(error)")
                 // A launch failure is never silent: it reaches the menu and the pill.
                 launchError = "\(error)"
-                pill.show(.failed("\(error)"))
+                pill.show(.failed(stage: .launch, reason: "\(error)"))
             }
 
             menuBar = MenuBarController(
@@ -156,7 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 copyToPasteboard: copyToPasteboard,
                 showHistory: { [weak self] in self?.showHistory() }
             )
-            pill.show(.failed(message))
+            pill.show(.failed(stage: .launch, reason: message))
         }
     }
 
