@@ -268,6 +268,16 @@ final class DictationController: @unchecked Sendable {
         monitor?.stop()
     }
 
+    /// True from the hotkey press that starts a job until `drain()` finishes it. `holding` and
+    /// `pending` alone go quiet during transcription and cleanup — nothing is deposited until `run()`
+    /// reaches its end — so this reads the same sequence gate `drain()` already serializes insertion
+    /// with: a job is still outstanding exactly while `nextToInsert` hasn't caught up to `nextSequence`.
+    var hasJobsInFlight: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return nextToInsert < nextSequence
+    }
+
     func handle(_ event: HotkeyEvent) {
         switch event {
         case .start: beginRecording()

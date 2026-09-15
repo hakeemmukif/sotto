@@ -14,6 +14,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // is the thing a user changes. A missing binary throws from Transcriber naming this path.
     private static let whisperBinaryPath = "/opt/homebrew/bin/whisper-cli"
 
+    // Only "Microphone" is ever produced today (DictationController.beginRecording), but the pane
+    // lookup stays a map rather than a single case so a name with no pane logs instead of guessing.
+    private static let systemSettingsPanes: [String: URL] = [
+        "Microphone": URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!,
+    ]
+
     static let diagnosticsPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/Sotto.log")
 
@@ -45,8 +51,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppPresence.install()
 
-        // A click on a terminal pill already hides it; opening the destination is task 19.
-        pill.onActivate = { _ in }
+        pill.onActivate = { [weak self] route in
+            guard let self else { return }
+            // A second job can still be recording, transcribing, or cleaning while an older pill's
+            // route fires. Opening a window would activate Sotto and steal focus from whatever app
+            // that job's eventual paste is meant to land in, so a live job means the click only
+            // dismissed the pill — the never-activate invariant holds either way.
+            guard self.controller?.hasJobsInFlight != true else { return }
+            switch route {
+            case .settings: self.showSettings()
+            case .history: self.showHistory()
+            case let .systemSettings(what):
+                guard let url = Self.systemSettingsPanes[what] else {
+                    Self.diagnose("no System Settings pane mapped for permission \"\(what)\"")
+                    return
+                }
+                NSWorkspace.shared.open(url)
+            }
+        }
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Sotto")
