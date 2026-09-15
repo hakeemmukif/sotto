@@ -25,6 +25,11 @@ final class MenuBarController: NSObject {
     private var isDictationEnabled: Bool
     private var dictationError: String?
     private var loginItemError: String?
+    private var failureReason: String?
+    private var cleanupWarning: String?
+    // Captured at construction time so `clearFailure()` restores the exact image the caller set,
+    // rather than guessing a name back.
+    private let normalImage: NSImage?
 
     private(set) var menu = NSMenu()
 
@@ -43,6 +48,7 @@ final class MenuBarController: NSObject {
         showHistory: @escaping () -> Void = {}
     ) {
         self.statusItem = statusItem
+        normalImage = statusItem.button?.image
         self.history = history
         self.hotkeyLabel = hotkeyLabel
         isDictationEnabled = dictationEnabled
@@ -110,6 +116,23 @@ final class MenuBarController: NSObject {
         copyToPasteboard(transcript)
     }
 
+    func reportFailure(_ reason: String) {
+        failureReason = reason
+        statusItem.button?.image = NSImage(systemSymbolName: "mic.badge.xmark", accessibilityDescription: nil)
+        rebuildMenu()
+    }
+
+    func clearFailure() {
+        failureReason = nil
+        statusItem.button?.image = normalImage
+        rebuildMenu()
+    }
+
+    func setCleanupWarning(_ text: String?) {
+        cleanupWarning = text
+        rebuildMenu()
+    }
+
     private func rebuildMenu() {
         let menu = NSMenu()
 
@@ -125,6 +148,26 @@ final class MenuBarController: NSObject {
         )
         dictationItem.target = self
         menu.addItem(dictationItem)
+
+        if let failureReason {
+            let failure = NSMenuItem(
+                title: "Last dictation failed: \(failureReason) — Settings…",
+                action: nil,
+                keyEquivalent: ""
+            )
+            failure.isEnabled = false
+            menu.addItem(failure)
+        }
+
+        if let cleanupWarning {
+            let warning = NSMenuItem(
+                title: "Cleanup model '\(cleanupWarning)' not installed — Settings…",
+                action: nil,
+                keyEquivalent: ""
+            )
+            warning.isEnabled = false
+            menu.addItem(warning)
+        }
 
         let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
         loginItem.target = self
