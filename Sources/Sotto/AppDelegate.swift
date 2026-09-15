@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyLabel: String?
     private var cleaner: Cleaner?
     private var register: CleanupFailureRegister?
+    private var modelSettingsModel: ModelSettingsModel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppPresence.install()
@@ -84,6 +85,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             cleaner = cleanerSlot
             let register = CleanupFailureRegister()
             self.register = register
+
+            // Same vocabulary prompt DictationController builds below, computed here too so the
+            // settings panel's Test button sends exactly what a real dictation would send, not a
+            // bare Prompts.cleanup — a model that only leaks reasoning under the real prompt would
+            // otherwise pass its own health check.
+            let vocabularyPrompt = try Vocabulary.whisperPrompt(settings.vocabulary)
+            let ollamaProbe = OllamaProbe()
+            // Ties to `cleanerSlot`'s own nil-ness: with no running cleaner there is nothing this
+            // panel could test or apply against, so there is no settings model either.
+            modelSettingsModel = cleanerSlot.map { slot in
+                ModelSettingsModel(
+                    backend: settings.cleanupBackend,
+                    register: register,
+                    now: Date.init,
+                    fetchVersion: { try await ollamaProbe.version() },
+                    fetchInstalledModels: { try await ollamaProbe.installedModels() },
+                    fetchLoadedModels: { try await ollamaProbe.loadedModels() },
+                    readFileModel: { try SettingsFile.readCleanupModel(at: Settings.defaultURL) },
+                    writeFileModel: { try SettingsFile.write(cleanupModel: $0, at: Settings.defaultURL) },
+                    makeCleaner: { model in
+                        ProfiledCleaner(
+                            underlying: OllamaBackend(model: model),
+                            appProfiles: settings.appProfiles,
+                            vocabulary: vocabularyPrompt
+                        )
+                    },
+                    applyToSlot: { cleaner, model in slot.replace(cleaner, model: model) },
+                    slotModel: { slot.model },
+                    copyToPasteboard: copyToPasteboard,
+                    openFile: { NSWorkspace.shared.open($0) }
+                )
+            }
+
             // Measured 8.44 s cold against 0.91 s warm: without this the first dictation after a
             // reboot takes eight seconds. Off the main thread, or it delays launch by exactly that.
             let transcriber = Transcriber(binaryPath: Self.whisperBinaryPath, modelPath: settings.whisperModelPath)
@@ -183,7 +217,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showHistory() {
-        let controller = historyWindow ?? HistoryWindowController(store: store, hotkeyLabel: hotkeyLabel, cleaner: cleaner)
+        let controller = historyWindow ?? HistoryWindowController(
+            store: store, hotkeyLabel: hotkeyLabel, cleaner: cleaner, model: modelSettingsModel
+        )
         historyWindow = controller
         controller.show()
     }
