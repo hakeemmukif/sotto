@@ -5,6 +5,10 @@ import SwiftUI
 /// Runs `body` after `delay`. Injected so a test can fire a dismissal without waiting on a clock.
 typealias PillScheduler = @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void
 
+/// The current time, in the same units as `PillState.recording`'s `elapsed`. Injected for the same
+/// reason `PillScheduler` is: so a test can drive the elapsed clock without a real wait.
+typealias PillClock = @MainActor () -> TimeInterval
+
 /// Hosts the pill body and takes the click in a terminal state.
 ///
 /// `acceptsFirstMouse` is the part that matters: the panel can never become key, and AppKit delivers
@@ -34,13 +38,26 @@ final class PillWindow {
 
     private let host: PillHostingView
     private let schedule: PillScheduler
+    private let clock: PillClock
     private var shown: PillState?
     /// A newer state belongs to a newer job, and the older job's pending dismissal must not take the
-    /// newer pill down with it.
+    /// newer pill down with it. The elapsed-clock tick reuses the same job number for the same reason.
     private var job = 0
+    /// When the current `.recording` job started, in `clock`'s units. `nil` outside `.recording`, so
+    /// the tick loop stops the moment `shown` stops being a recording rather than ticking forever.
+    private var recordingStartedAt: TimeInterval?
 
-    init(schedule: @escaping PillScheduler = PillWindow.afterDelay) {
+    /// How often the elapsed clock repaints while a recording is live. A whole second matches the
+    /// display's own resolution (`clock(_:)` formats to seconds), so a faster tick would repaint
+    /// without changing what is on screen.
+    private static let elapsedTickInterval: TimeInterval = 1
+
+    init(
+        schedule: @escaping PillScheduler = PillWindow.afterDelay,
+        clock: @escaping PillClock = { ProcessInfo.processInfo.systemUptime }
+    ) {
         self.schedule = schedule
+        self.clock = clock
         host = PillHostingView(rootView: PillContentView(state: .working(.transcribing)))
         // The pill is sized to its message, never to a fixed width: a fixed 140 pt cut every message
         // longer than about eighteen characters, which is most of them. `.intrinsicContentSize` and
@@ -94,6 +111,16 @@ final class PillWindow {
 
         job += 1
         let current = job
+
+        if case let .recording(_, elapsed) = state {
+            // Preserves whatever elapsed the caller already supplied — ordinarily 0, a fresh job —
+            // rather than assuming it, so the timer keeps counting from where the state says it is.
+            recordingStartedAt = clock() - elapsed
+            scheduleElapsedTick(job: current)
+        } else {
+            recordingStartedAt = nil
+        }
+
         guard let delay = PillState.dismissDelay(for: state) else { return }
         schedule(delay) { [weak self] in
             guard let self, self.job == current else { return }
@@ -104,6 +131,33 @@ final class PillWindow {
     func hide() {
         shown = nil
         panel.orderOut(nil)
+    }
+
+    /// Feeds the audio meter, which is a side channel entirely separate from `show`: the pipeline
+    /// never resends `.recording` with an updated level, so this is the only way the bar moves.
+    /// Ignored outside `.recording` so a level arriving after the hold ended — the tap can still be
+    /// draining its last buffer after `stop()` — cannot resurrect or alter a terminal pill.
+    func updateLevel(_ level: Float) {
+        guard let shown, case let .recording(_, elapsed) = shown else { return }
+        let updated = PillState.recording(level: level, elapsed: elapsed)
+        self.shown = updated
+        host.rootView = PillContentView(state: updated)
+    }
+
+    /// Re-renders `.recording` with a freshly computed elapsed every tick, needing no audio data at
+    /// all. Stops itself the moment `job` moves on or `shown` is no longer `.recording` — the same
+    /// staleness guard `show`'s own dismissal scheduling uses.
+    private func scheduleElapsedTick(job: Int) {
+        schedule(Self.elapsedTickInterval) { [weak self] in
+            guard let self, self.job == job,
+                  let startedAt = self.recordingStartedAt,
+                  case let .recording(level, _)? = self.shown
+            else { return }
+            let updated = PillState.recording(level: level, elapsed: self.clock() - startedAt)
+            self.shown = updated
+            self.host.rootView = PillContentView(state: updated)
+            self.scheduleElapsedTick(job: job)
+        }
     }
 
     private func activate() {

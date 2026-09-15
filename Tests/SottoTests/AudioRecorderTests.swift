@@ -145,7 +145,7 @@ private func makeSyntheticBuffer(format: AVAudioFormat, seconds: Double, frequen
 
 @Test(.disabled("requires microphone (TCC) permission not grantable on this machine"))
 func liveRecordingProducesAWAVFile() throws {
-    let recorder = AudioRecorder()
+    let recorder = AudioRecorder(onLevel: { _ in })
     try recorder.start()
     Thread.sleep(forTimeInterval: 1.0)
     let url = try recorder.stop()

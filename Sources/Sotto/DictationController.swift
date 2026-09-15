@@ -191,6 +191,7 @@ final class DictationController: @unchecked Sendable {
         settings: Settings,
         whisperBinaryPath: String,
         cleaner: Cleaner?,
+        onLevel: @escaping @Sendable (Float) -> Void,
         history: History = History(),
         store: HistoryStore? = nil,
         onStateChange: @escaping @Sendable (Int, DictationState) -> Void
@@ -211,7 +212,7 @@ final class DictationController: @unchecked Sendable {
         let inserter = TextInserter(mode: settings.insertionMode)
         // One recorder, because you can only speak one dictation at a time. `start` and `stop` reach
         // it only from the hotkey delivery thread, one after the other, never concurrently.
-        nonisolated(unsafe) let recorder = AudioRecorder()
+        nonisolated(unsafe) let recorder = AudioRecorder(onLevel: onLevel)
 
         self.init(
             hotkey: hotkey,

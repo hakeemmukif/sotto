@@ -215,8 +215,8 @@ struct PillContentView: View {
     }
 }
 
-/// A plain bar filled in proportion to the level. Task 14 makes `level` move; until then it is zero
-/// and the bar reads empty, which is the truth about the meter today.
+/// A plain bar filled in proportion to the level, which moves: `AudioRecorder`'s tap computes an
+/// RMS-based level and `PillWindow.updateLevel` feeds it here over the same side channel.
 private struct LevelBar: View {
     let level: Float
 
