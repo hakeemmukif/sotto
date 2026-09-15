@@ -1,13 +1,30 @@
 import AVFoundation
 import Foundation
 
-enum TranscriberError: Error, Equatable {
+enum TranscriberError: Error, Equatable, CustomStringConvertible {
     case whisperBinaryMissing(String)
     case modelMissing(String)
     case whisperFailed(exitCode: Int32, stderr: String)
     case whisperFailedWithoutDetail(exitCode: Int32)
     case warmUpClipAllocationFailed
     case emptyTranscript
+
+    var description: String {
+        switch self {
+        case let .whisperBinaryMissing(path):
+            "no whisper-cli binary at \(path); install it with brew install whisper-cpp."
+        case let .modelMissing(path):
+            "no whisper model at \(path); check settings.json's whisperModelPath."
+        case let .whisperFailed(exitCode, stderr):
+            "whisper-cli failed (exit code \(exitCode)): \(stderr)"
+        case let .whisperFailedWithoutDetail(exitCode):
+            "whisper-cli failed (exit code \(exitCode)) with nothing on stderr"
+        case .warmUpClipAllocationFailed:
+            "could not allocate the silent warm-up audio buffer"
+        case .emptyTranscript:
+            "whisper-cli produced an empty transcript"
+        }
+    }
 }
 
 struct Transcriber {
