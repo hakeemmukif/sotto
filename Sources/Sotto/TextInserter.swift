@@ -3,13 +3,30 @@ import Carbon
 import CoreGraphics
 import Foundation
 
-enum InsertionError: Error, Equatable {
+enum InsertionError: Error, Equatable, CustomStringConvertible {
     case secureInputActive
     case pasteboardUnreadable
     case pasteboardTypeUnreadable(String)
     case pasteboardWriteFailed
     case pasteboardChangedDuringInsertion(expected: Int, actual: Int)
     case eventCreationFailed
+
+    var description: String {
+        switch self {
+        case .secureInputActive:
+            "secure input is active, so the keystroke would be dropped silently"
+        case .pasteboardUnreadable:
+            "the pasteboard's items could not be read"
+        case let .pasteboardTypeUnreadable(type):
+            "the pasteboard type \(type) could not be read, so it cannot be restored"
+        case .pasteboardWriteFailed:
+            "writing to the pasteboard failed"
+        case let .pasteboardChangedDuringInsertion(expected, actual):
+            "the pasteboard changed during insertion (expected change count \(expected), got \(actual)), so nothing was restored"
+        case .eventCreationFailed:
+            "could not create the synthetic keyboard event"
+        }
+    }
 }
 
 /// The proof that secure input was checked. `insert` cannot be called without one and the only way
