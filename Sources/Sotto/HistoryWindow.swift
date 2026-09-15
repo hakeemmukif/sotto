@@ -148,30 +148,13 @@ struct HistoryView: View {
         .padding(.bottom, 6)
     }
 
-    // A Menu rather than a Picker: NSPopUpButton ignores both `.font` and `.frame(height:)`, so a
-    // Picker cannot be held to the toolbar's control height or given the Chicago face.
     private var appMenu: some View {
-        Menu {
+        ChicagoDropdown(label: selectedAppName, width: 130) {
             Button("All apps") { viewModel.appFilter = nil }
             ForEach(viewModel.availableApps, id: \.bundleID) { app in
                 Button(app.name) { viewModel.appFilter = app.bundleID }
             }
-        } label: {
-            HStack(spacing: 0) {
-                Text(selectedAppName).font(Chicago.ui(11)).lineLimit(1)
-                Spacer(minLength: 8)
-                Image(systemName: "arrowtriangle.down.fill").font(.system(size: 6))
-            }
-            .foregroundStyle(.black)
-            .padding(.leading, 7)
-            .padding(.trailing, 6)
-            .frame(width: 130, height: Self.controlHeight)
-            .background(Color.white)
-            .chicagoSunken()
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
     }
 
     private var selectedAppName: String {

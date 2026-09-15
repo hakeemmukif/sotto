@@ -185,6 +185,43 @@ struct ChicagoTitleBar: View {
     }
 }
 
+/// A Windows 95 dropdown: a white sunken field showing `label`, opening `content` as a menu.
+///
+/// A Menu rather than a Picker: NSPopUpButton ignores both `.font` and `.frame(height:)`, so a
+/// Picker cannot be held to the control's height or given the Chicago face.
+struct ChicagoDropdown<Content: View>: View {
+    let label: String
+    let width: CGFloat
+    let content: Content
+
+    init(label: String, width: CGFloat, @ViewBuilder content: () -> Content) {
+        self.label = label
+        self.width = width
+        self.content = content()
+    }
+
+    var body: some View {
+        Menu {
+            content
+        } label: {
+            HStack(spacing: 0) {
+                Text(label).font(Chicago.ui(11)).lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "arrowtriangle.down.fill").font(.system(size: 6))
+            }
+            .foregroundStyle(.black)
+            .padding(.leading, 7)
+            .padding(.trailing, 6)
+            .frame(width: width, height: 24)
+            .background(Color.white)
+            .chicagoSunken()
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+    }
+}
+
 /// A Windows 95 tab strip. The selected tab is taller and sits flush with the panel below it, the
 /// others drop by the difference so the strip reads as one row of folder tabs.
 struct ChicagoTabBar: View {
