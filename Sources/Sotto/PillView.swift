@@ -153,16 +153,17 @@ extension PillState {
     }
 }
 
-/// The pill body. Deliberately neutral — plain colours, system font, a plain bar — because task 20
-/// replaces this body with the Chicago skin and can only stay a body swap if nothing structural
-/// lives in the styling.
+/// The pill body: a Chicago status strip, not a window. It renders on top of whatever app the user
+/// is typing into — a dark editor, a white document, a saturated design canvas — and only an opaque
+/// face colour holds its ~11:1 black-on-grey contrast over all three; the previous translucent body
+/// inherited whatever was underneath it.
 struct PillContentView: View {
     /// Wider than this and the pill stops reading as a status indicator and starts reading as a
     /// dialog. Every line is held to one line, so the height is three lines at worst and the panel's
     /// `fittingSize` is correct without a wrapping pass.
     nonisolated static let maxWidth: CGFloat = 360
 
-    /// The size `detail` renders the reason and route lines at.
+    /// The size `content` renders the reason and route lines at.
     nonisolated static let detailFontSize: CGFloat = 11
 
     /// What one detail line actually has to spend: the pill's width less the 12 pt of horizontal
@@ -173,62 +174,76 @@ struct PillContentView: View {
     let state: PillState
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(state.headline)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                if let reason = state.reasonLine {
-                    detail(reason)
-                }
-                if let route = state.routeLine {
-                    detail(route)
-                }
-            }
-            if case let .recording(level, elapsed) = state {
-                LevelBar(level: level)
-                Text(Self.clock(elapsed))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: Self.maxWidth, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.92))
-        )
+        content
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Chicago.face)
+            .chicagoThinRaised()
+            // A 1 px black frame outside the bevel: the pill has no window chrome of its own to
+            // separate it from whatever it floats over, so the outline is what reads as an edge.
+            .padding(1)
+            .background(Chicago.bevelBlack)
+            .frame(maxWidth: Self.maxWidth, alignment: .leading)
     }
 
-    private func detail(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.tail)
+    @ViewBuilder
+    private var content: some View {
+        switch state {
+        case let .recording(level, elapsed):
+            HStack(spacing: 6) {
+                HStack(spacing: 3) {
+                    Text("●")
+                    Text("REC")
+                }
+                .font(Chicago.pixel(9))
+                .foregroundStyle(Chicago.warning)
+
+                Text(Self.clock(elapsed))
+                    .font(Chicago.pixel(9))
+
+                ChicagoProgressBar(blocks: 12, lit: Int((level * 12).rounded()))
+            }
+
+        case .working:
+            HStack(spacing: 8) {
+                Text(state.headline)
+                    .font(Chicago.ui(11))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                ChicagoProgressBar(blocks: 12, sweep: 3)
+            }
+
+        case .pastedRaw, .secureInput, .permissionMissing, .failed:
+            VStack(alignment: .leading, spacing: 1) {
+                Text(state.headline)
+                    .font(Chicago.ui(11))
+                    .fontWeight(.bold)
+                    .foregroundStyle(Chicago.warning)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                if let reason = state.reasonLine {
+                    Text(reason)
+                        .font(Chicago.ui(Self.detailFontSize))
+                        .foregroundStyle(.black)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
+                if let route = state.routeLine {
+                    Text(route)
+                        .font(Chicago.ui(Self.detailFontSize))
+                        .foregroundStyle(Chicago.muted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+        }
     }
 
     private static func clock(_ elapsed: TimeInterval) -> String {
         let seconds = Int(elapsed)
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
-    }
-}
-
-/// A plain bar filled in proportion to the level, which moves: `AudioRecorder`'s tap computes an
-/// RMS-based level and `PillWindow.updateLevel` feeds it here over the same side channel.
-private struct LevelBar: View {
-    let level: Float
-
-    var body: some View {
-        let track: CGFloat = 40
-        Capsule()
-            .fill(Color.secondary.opacity(0.25))
-            .frame(width: track, height: 4)
-            .overlay(alignment: .leading) {
-                Capsule()
-                    .fill(Color.primary.opacity(0.55))
-                    .frame(width: track * CGFloat(min(max(level, 0), 1)), height: 4)
-            }
     }
 }

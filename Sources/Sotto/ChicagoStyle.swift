@@ -224,6 +224,62 @@ struct ChicagoDropdown<Content: View>: View {
 
 /// A Windows 95 tab strip. The selected tab is taller and sits flush with the panel below it, the
 /// others drop by the difference so the strip reads as one row of folder tabs.
+/// A Windows 95 segmented progress bar: discrete blocks in a white sunken well. Determinate mode
+/// lights blocks left to right in proportion to progress; indeterminate mode sweeps a lit window
+/// across the well on its own clock, for phases that have no fraction to report.
+struct ChicagoProgressBar: View {
+    private enum Mode {
+        case determinate(lit: Int)
+        case indeterminate(sweep: Int)
+    }
+
+    private static let blockWidth: CGFloat = 5
+    private static let blockHeight: CGFloat = 11
+    private static let gap: CGFloat = 2
+    private static let stepInterval: TimeInterval = 1.0 / 8 // ~8 steps/second
+
+    private let blocks: Int
+    private let mode: Mode
+
+    init(blocks: Int, lit: Int) {
+        self.blocks = blocks
+        mode = .determinate(lit: lit)
+    }
+
+    init(blocks: Int, sweep: Int) {
+        self.blocks = blocks
+        mode = .indeterminate(sweep: sweep)
+    }
+
+    var body: some View {
+        switch mode {
+        case let .determinate(lit):
+            well(litRange: 0 ..< min(max(lit, 0), blocks))
+        case let .indeterminate(sweep):
+            // Driven by wall-clock time, not injected state: the marquee is the pill's one animation,
+            // and nothing outside this view needs to know it is running.
+            TimelineView(.periodic(from: .now, by: Self.stepInterval)) { timeline in
+                let span = max(blocks - sweep, 1)
+                let step = Int(timeline.date.timeIntervalSinceReferenceDate / Self.stepInterval) % span
+                well(litRange: step ..< (step + sweep))
+            }
+        }
+    }
+
+    private func well(litRange: Range<Int>) -> some View {
+        HStack(spacing: Self.gap) {
+            ForEach(0 ..< blocks, id: \.self) { index in
+                Rectangle()
+                    .fill(litRange.contains(index) ? Chicago.selection : Color.clear)
+                    .frame(width: Self.blockWidth, height: Self.blockHeight)
+            }
+        }
+        .padding(2)
+        .background(Color.white)
+        .chicagoSunken()
+    }
+}
+
 struct ChicagoTabBar: View {
     let titles: [String]
     @Binding var selection: Int
