@@ -143,15 +143,35 @@ struct PillWindowTests {
         #expect(tall.height < short.height * 3)
     }
 
-    @Test func anOverlongReasonIsCutForDisplayAndPointsAtTheLog() {
+    @Test func aReasonTooWideForItsLinePointsAtTheLog() {
         let whole = String(repeating: "e", count: 400)
         let state = PillState.failed(stage: .transcription, reason: whole)
 
-        #expect(state.reasonLine?.count == PillState.reasonDisplayLimit + 1)
-        #expect(state.reasonLine?.hasSuffix("…") == true)
+        #expect(PillState.reasonFits(whole) == false)
         #expect(state.routeLine == "Full text in ~/Library/Logs/Sotto.log.")
-        // Only the rendering is bounded: the state still carries every character the pipeline saw.
+        // Only the rendering is bounded: the state still carries every character the pipeline saw,
+        // and hands the whole of it to the renderer to cut.
+        #expect(state.reasonLine == whole)
         #expect(state == .failed(stage: .transcription, reason: whole))
+    }
+
+    // The failure that started all of this. It is 73 characters — a 200-character budget called it
+    // safe — but 395 pt wide against a 336 pt line, so it was cut on screen with nowhere to read the
+    // rest. Measuring rather than counting is what makes the pointer appear.
+    @Test func theRealFourOhFourReasonIsTooWideAndSaysWhereToRead() {
+        let reason = #"cleanup request failed (HTTP 404): {"error":"model 'qwen3:8b' not found"}"#
+        let state = PillState.failed(stage: .cleanup, reason: reason)
+
+        #expect(reason.count < 200)
+        #expect(PillState.reasonFits(reason) == false)
+        #expect(state.routeLine == "Full text in ~/Library/Logs/Sotto.log.")
+    }
+
+    @Test func aReasonThatFitsKeepsItsRoute() {
+        let state = PillState.failed(stage: .cleanup, reason: "the cleanup backend is unreachable")
+
+        #expect(PillState.reasonFits("the cleanup backend is unreachable"))
+        #expect(state.routeLine == "Click to open Settings.")
     }
 
     @Test func everyDismissDelayMatchesHowLongItsStateTakesToRead() {

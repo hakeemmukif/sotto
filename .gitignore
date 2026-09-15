@@ -2,3 +2,6 @@
 Sotto.app/
 .env
 .DS_Store
+
+# Worktrees created for parallel agent tasks
+.claude/worktrees/

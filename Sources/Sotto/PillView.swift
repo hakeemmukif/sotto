@@ -88,9 +88,21 @@ extension PillState {
 // The pill is the only surface the user sees on every dictation, so a message state says three
 // things: what happened, why, and what to do about it. Status never travels on colour alone.
 extension PillState {
-    /// Past this the rendered reason is cut and the route line points at the log instead. The state
-    /// keeps the whole string: a reason is diagnostic data, and bounding the pill must not bound it.
-    static let reasonDisplayLimit = 200
+    /// Whether the reason survives its single line intact. Measured rather than counted: the reason
+    /// gets one line inside `PillContentView.maxWidth`, which holds about 55 narrow characters and
+    /// far fewer wide ones, so any character budget is wrong for some strings. Measured 2026-09-16,
+    /// the real 404 reason — `cleanup request failed (HTTP 404): {"error":"model 'qwen3:8b' not
+    /// found"}` — is 73 characters but 395 pt, so a 200-character budget called it safe while the
+    /// renderer cut it and offered nowhere to read the rest.
+    ///
+    /// The state keeps the whole string either way: a reason is diagnostic data, and bounding the
+    /// pill must not bound it.
+    static func reasonFits(_ reason: String) -> Bool {
+        let width = (reason as NSString)
+            .size(withAttributes: [.font: NSFont.systemFont(ofSize: PillContentView.detailFontSize)])
+            .width
+        return width <= PillContentView.reasonLineWidth
+    }
 
     /// What happened and what it cost.
     var headline: String {
@@ -121,10 +133,7 @@ extension PillState {
     var reasonLine: String? {
         switch self {
         case .recording, .working, .pastedRaw, .secureInput, .permissionMissing: nil
-        case let .failed(_, reason):
-            reason.count > Self.reasonDisplayLimit
-                ? String(reason.prefix(Self.reasonDisplayLimit)) + "…"
-                : reason
+        case let .failed(_, reason): reason
         }
     }
 
@@ -132,7 +141,7 @@ extension PillState {
     var routeLine: String? {
         // A cut reason is unreadable in place, so the line spends itself saying where the whole one
         // is instead of offering a destination that would not show it either.
-        if case let .failed(_, reason) = self, reason.count > Self.reasonDisplayLimit {
+        if case let .failed(_, reason) = self, !Self.reasonFits(reason) {
             return "Full text in ~/Library/Logs/Sotto.log."
         }
         switch Self.route(for: self) {
@@ -151,7 +160,15 @@ struct PillContentView: View {
     /// Wider than this and the pill stops reading as a status indicator and starts reading as a
     /// dialog. Every line is held to one line, so the height is three lines at worst and the panel's
     /// `fittingSize` is correct without a wrapping pass.
-    static let maxWidth: CGFloat = 360
+    nonisolated static let maxWidth: CGFloat = 360
+
+    /// The size `detail` renders the reason and route lines at.
+    nonisolated static let detailFontSize: CGFloat = 11
+
+    /// What one detail line actually has to spend: the pill's width less the 12 pt of horizontal
+    /// padding on each side. `PillState.reasonFits` measures against this, so the log pointer appears
+    /// exactly when the renderer cuts the text rather than at a guessed character count.
+    nonisolated static let reasonLineWidth = maxWidth - 24
 
     let state: PillState
 
