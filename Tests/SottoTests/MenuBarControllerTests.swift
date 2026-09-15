@@ -62,10 +62,11 @@ private func makeController(
     dictationError: String? = nil,
     calls: Calls = Calls(),
     loginItemStub: LoginItemStub = LoginItemStub(),
-    pasteboard: PasteboardSpy = PasteboardSpy()
+    pasteboard: PasteboardSpy = PasteboardSpy(),
+    statusItem: NSStatusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 ) -> MenuBarController {
     MenuBarController(
-        statusItem: NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength),
+        statusItem: statusItem,
         history: history,
         hotkeyLabel: hotkeyLabel,
         dictationEnabled: dictationEnabled,
@@ -247,5 +248,59 @@ struct MenuBarQuitTests {
     @Test func theMenuAlwaysEndsInQuit() {
         let controller = makeController()
         #expect(controller.menu.items.last?.title == "Quit")
+    }
+}
+
+@Suite("Menu bar — reporting failures", .serialized)
+@MainActor
+struct MenuBarFailureTests {
+    @Test func reportingAFailureShowsTheReasonAndUsesAResolvableSymbol() {
+        let controller = makeController()
+        controller.reportFailure("model crashed")
+
+        #expect(titles(controller.menu).contains("Last dictation failed: model crashed — Settings…"))
+        #expect(NSImage(systemSymbolName: "mic.badge.xmark", accessibilityDescription: nil) != nil)
+    }
+
+    @Test func clearingAFailureRemovesTheLineAndRestoresTheImage() {
+        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let normalImage = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: nil)
+        statusItem.button?.image = normalImage
+        let controller = makeController(statusItem: statusItem)
+
+        controller.reportFailure("model crashed")
+        #expect(statusItem.button?.image !== normalImage)
+
+        controller.clearFailure()
+
+        #expect(!titles(controller.menu).contains { $0.hasPrefix("Last dictation failed") })
+        #expect(statusItem.button?.image === normalImage)
+    }
+
+    @Test func settingACleanupWarningShowsItAndClearingItRemovesIt() {
+        let controller = makeController()
+
+        controller.setCleanupWarning("qwen3:8b")
+        #expect(titles(controller.menu).contains("Cleanup model 'qwen3:8b' not installed — Settings…"))
+
+        controller.setCleanupWarning(nil)
+        #expect(!titles(controller.menu).contains { $0.hasPrefix("Cleanup model") })
+    }
+
+    @Test func theFailureAndCleanupWarningLinesCoexistAndClearIndependently() {
+        let controller = makeController()
+
+        controller.reportFailure("model crashed")
+        controller.setCleanupWarning("qwen3:8b")
+
+        var all = titles(controller.menu)
+        #expect(all.contains("Last dictation failed: model crashed — Settings…"))
+        #expect(all.contains("Cleanup model 'qwen3:8b' not installed — Settings…"))
+
+        controller.clearFailure()
+
+        all = titles(controller.menu)
+        #expect(!all.contains { $0.hasPrefix("Last dictation failed") })
+        #expect(all.contains("Cleanup model 'qwen3:8b' not installed — Settings…"))
     }
 }
