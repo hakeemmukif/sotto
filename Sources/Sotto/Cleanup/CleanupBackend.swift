@@ -1,12 +1,38 @@
 import Foundation
 
-enum CleanupError: Error, Equatable {
+enum CleanupError: Error, Equatable, CustomStringConvertible {
     case missingKey(String)
     case backendUnavailable
     case requestFailed(status: Int, body: String)
     case requestFailedWithoutDetail(status: Int)
     case nonHTTPResponse
     case emptyResponse
+    case reasoningLeaked(model: String, characters: Int)
+
+    // These reach the user verbatim — on the pill and in the settings panel — so none of them may
+    // fall back to the synthesised enum description the way `"\(error)"` would.
+    var description: String {
+        switch self {
+        case let .missingKey(name):
+            "\(name) is not set. Add it to ~/.config/sotto/.env."
+        case .backendUnavailable:
+            "the cleanup backend is unreachable"
+        case let .requestFailed(status, body):
+            "cleanup request failed (HTTP \(status)): \(body)"
+        case let .requestFailedWithoutDetail(status):
+            "cleanup request failed (HTTP \(status))"
+        case .nonHTTPResponse:
+            "the cleanup backend did not return an HTTP response"
+        case .emptyResponse:
+            "the cleanup backend returned nothing"
+        case let .reasoningLeaked(model, characters):
+            """
+            model '\(model)' leaked reasoning into its output \
+            (\(characters.formatted(.number.locale(Locale(identifier: "en_US")))) characters). \
+            Pick a different model.
+            """
+        }
+    }
 }
 
 // Named `Cleaner` rather than `CleanupBackend` because `CleanupBackend` is already the settings enum
@@ -28,7 +54,13 @@ enum CleanupHTTP {
         .timedOut,
     ]
 
-    static func post(json: Data, to endpoint: URL, headers: [String: String]) async throws -> Data {
+    /// URLSession's 60 s default is an idle timeout, and `stream: false` means Ollama sends nothing
+    /// until it has finished — so a model that reasons for 64 s presents as a stalled connection
+    /// rather than a slow model. Bounding it at 20 s keeps that misreading short: past this the job
+    /// degrades to a raw paste, which is the sanctioned degradation, instead of hanging for a minute.
+    static let timeout: TimeInterval = 20
+
+    static func makeRequest(json: Data, endpoint: URL, headers: [String: String]) -> URLRequest {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -36,6 +68,12 @@ enum CleanupHTTP {
             request.setValue(value, forHTTPHeaderField: field)
         }
         request.httpBody = json
+        request.timeoutInterval = timeout
+        return request
+    }
+
+    static func post(json: Data, to endpoint: URL, headers: [String: String]) async throws -> Data {
+        let request = makeRequest(json: json, endpoint: endpoint, headers: headers)
 
         let data: Data
         let response: URLResponse
