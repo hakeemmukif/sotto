@@ -100,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 settings: settings,
                 whisperBinaryPath: Self.whisperBinaryPath,
                 cleaner: cleanerSlot,
+                onLevel: { [pill] level in pill.updateLevel(level) },
                 history: history,
                 store: store
             ) { [pill] sequence, state in

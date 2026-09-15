@@ -92,6 +92,35 @@ struct PillWindowTests {
         }
     }
 
+    // The meter is a side channel: the pipeline never resends `.recording` with a new level, so
+    // `updateLevel` is the only thing that ever moves the bar.
+    @Test func updateLevelWhileRecordingChangesTheShownLevel() {
+        let pill = PillWindow()
+        pill.show(.recording(level: 0.1, elapsed: 3))
+
+        pill.updateLevel(0.75)
+
+        let host = pill.panel.contentView as? PillHostingView
+        #expect(host?.rootView.state == .recording(level: 0.75, elapsed: 3))
+    }
+
+    // A level can still arrive after the hold ends — the tap can be draining its last buffer after
+    // `stop()` — and it must not resurrect or alter a terminal pill.
+    @Test func updateLevelIsANoOpForATerminalState() {
+        var pending: [(delay: TimeInterval, fire: @MainActor () -> Void)] = []
+        let pill = PillWindow(schedule: { delay, body in pending.append((delay, body)) })
+
+        pill.show(.pastedRaw)
+        #expect(pending.count == 1)
+
+        pill.updateLevel(0.9)
+
+        let host = pill.panel.contentView as? PillHostingView
+        #expect(host?.rootView.state == .pastedRaw)
+        // No new dismissal was scheduled, proof `show` was never called again.
+        #expect(pending.count == 1)
+    }
+
     @Test func everyPipelineStateIsRenderable() {
         let pill = PillWindow()
 

@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
+import Foundation
 
-enum AudioRecorderError: Error, Equatable {
+enum AudioRecorderError: Error, Equatable, CustomStringConvertible {
     case alreadyRecording
     case notRecording
     case unsupportedInputFormat
@@ -9,6 +10,43 @@ enum AudioRecorderError: Error, Equatable {
     case conversionFailed(String)
     case conversionFailedWithoutDetail
     case fileCreationFailed(String)
+
+    var description: String {
+        switch self {
+        case .alreadyRecording:
+            "already recording; stop the current recording before starting another"
+        case .notRecording:
+            "not recording; there is nothing to stop"
+        case .unsupportedInputFormat:
+            "the input device reported no sample rate or no channels"
+        case .converterCreationFailed:
+            "could not create an audio converter to the 16 kHz mono target format"
+        case .bufferCopyFailed:
+            "could not copy an audio buffer for later conversion"
+        case let .conversionFailed(detail):
+            "audio conversion failed: \(detail)"
+        case .conversionFailedWithoutDetail:
+            "audio conversion failed with nothing reported"
+        case let .fileCreationFailed(detail):
+            "could not write the recording to disk: \(detail)"
+        }
+    }
+}
+
+/// The pill's level meter, in dBFS mapped onto 0...1. A pure function, not a method on
+/// `AudioRecorder`, so it is unit-testable without a microphone.
+enum AudioLevel {
+    // Measured 2026-09-16: dictation speech sits comfortably above a quiet room's noise floor, so
+    // -50 dBFS reads as silence and the bar only lifts once there is real signal.
+    private static let floorDB: Float = -50
+
+    static func normalized(rms: Float) -> Float {
+        // log10(0) is -infinity, not an error — silence is a real reading, not a failed one — and
+        // it would clamp to the same 0 the floor produces anyway, so it is short-circuited instead.
+        guard rms > 0 else { return 0 }
+        let db = 20 * log10(rms)
+        return min(max((db - floorDB) / -floorDB, 0), 1)
+    }
 }
 
 // Buffers arrive from the tap in whatever chunk size AVAudioEngine hands over, but AVAudioConverter
@@ -105,10 +143,22 @@ final class AudioRecorder {
 
     static let minimumDuration: TimeInterval = 0.3
 
+    // 20 Hz is plenty for a meter bar to look continuous, and the tap fires far more often than
+    // that — hopping to main for every 1024-sample buffer would be wasted work the UI never sees.
+    private static let levelInterval: TimeInterval = 1.0 / 20.0
+
     private let engine = AVAudioEngine()
+    private let onLevel: @Sendable (Float) -> Void
     private var pipeline: AudioConversionPipeline?
     private var captureError: Error?
+    private var lastLevelEmit = Date.distantPast
     private(set) var isRecording = false
+
+    // Required, not defaulted: a caller that forgets to wire it up gets a silently dead meter, which
+    // is the exact bug this type exists to fix.
+    init(onLevel: @escaping @Sendable (Float) -> Void) {
+        self.onLevel = onLevel
+    }
 
     func start() throws {
         guard !isRecording else { throw AudioRecorderError.alreadyRecording }
@@ -127,6 +177,21 @@ final class AudioRecorder {
             } catch {
                 self?.captureError = error
             }
+
+            guard let self else { return }
+            let now = Date()
+            guard now.timeIntervalSince(self.lastLevelEmit) >= Self.levelInterval else { return }
+            self.lastLevelEmit = now
+
+            guard let channelData = buffer.floatChannelData?[0] else { return }
+            let frameLength = Int(buffer.frameLength)
+            guard frameLength > 0 else { return }
+            var sumOfSquares: Float = 0
+            for i in 0..<frameLength { sumOfSquares += channelData[i] * channelData[i] }
+            let rms = sqrt(sumOfSquares / Float(frameLength))
+            let level = AudioLevel.normalized(rms: rms)
+            let onLevel = self.onLevel
+            DispatchQueue.main.async { onLevel(level) }
         }
 
         do {
