@@ -24,12 +24,15 @@ hold ctrl ──▶ record ──▶ whisper.cpp ──▶ Ollama cleanup ──
 - **LLM cleanup** that removes filler and fixes punctuation without ever *answering* what you said.
 - **Pastes at the cursor** and restores your previous clipboard — including images and files, not
   just text.
-- **Refuses loudly** when it can't work: a red pill for secure input, amber when cleanup is
-  unreachable, and a specific error naming the exact System Settings pane when a permission is
+- **Refuses loudly** when it can't work: a red pill for secure input or a cleanup error — including
+  a model that isn't installed — amber when the backend is merely unreachable and the raw transcript
+  gets pasted anyway, and a specific error naming the exact System Settings pane when a permission is
   missing.
 - **Custom vocabulary** so `pnpm` and `Drizzle` survive both whisper and the cleanup pass.
 - **Per-app style profiles** — lowercase and unpunctuated in Terminal, full prose in Mail.
-- **In-memory history** of the last 20 transcripts, re-copyable from the menu bar. Nothing on disk.
+- **History** — the menu bar keeps the last 20 transcripts for a quick copy; every dictation is also
+  logged to `history.jsonl` (90-day trim) and browsable in a window (⌘Y), with search, a per-app
+  filter, and a raw/cleaned toggle.
 
 ## Measured performance
 
@@ -41,6 +44,12 @@ Against a 9.33 s clip. These numbers drove the design, not the other way round.
 | `whisper-cli` + `ggml-small.en` | 8.44 s | **0.40 s** |
 | Ollama `qwen3:8b` cleanup | 2.75 s | **0.75 s** |
 | End to end | — | **~1.86 s** |
+
+The cleanup row and everything downstream of it are specific to `qwen3:8b` — a number without its
+model is misleading, because not every model this size behaves the same. On Ollama 0.34.0,
+`qwen3:4b` ignores `think: false` outright and returned 20,945 characters of reasoning in 63.9 s for
+a nine-word transcript (measured 2026-09-15). Pick your cleanup model in Settings and press Test
+before trusting any of these numbers for a model that isn't `qwen3:8b`.
 
 Two consequences worth knowing:
 
@@ -171,6 +180,23 @@ it bothers you.
 `groq` and `openai` read their keys from `.env` at the repo root or `~/.config/sotto/.env`. A
 missing key throws `missingKey("GROQ_API_KEY")` — it never silently falls back to another backend.
 
+### Changing the cleanup model without editing JSON
+
+`cleanupModel` no longer requires a hand edit and a relaunch. The Settings tab — `⌘,`, or the third
+tab of the `⌘Y` window — lists whatever models Ollama actually has installed, lets you Test one
+against a fixed fixture sentence before switching to it, and Apply writes `settings.json` and swaps
+the running cleaner in the same call. (Test works against any backend; the installed-models dropdown
+and Apply are Ollama-only — a remote backend has nothing local to swap to.)
+
+Its Health panel always shows the verdict of the model's last Test, a "Last dictation" line naming
+the most recent failure with its stage, its cleanup latency, and why (or "none this session"), a
+failure count, and a button to open the log; for an Ollama backend it also shows whether the daemon
+answers, whether the selected model is installed, and whether it's loaded or cold. Every row reads
+"— not checked" until it has actually run once, and **installed is deliberately not health**:
+`qwen3:4b` was installed and reachable and still returned 20,945 characters of reasoning in 63.9 s
+for a nine-word transcript (Ollama 0.34.0, measured 2026-09-15) — a tick on installed alone would
+have passed it.
+
 ---
 
 ## Signing
@@ -216,7 +242,7 @@ them with a syntax error, unlike `plutil`.
 ## Development
 
 ```sh
-./test.sh          # 108 tests
+./test.sh          # 223 tests in 34 suites
 ./build.sh         # signed Sotto.app
 ```
 
@@ -224,6 +250,13 @@ them with a syntax error, unlike `plutil`.
 > `swift test` builds the test bundle, runs **zero tests**, and exits 0. It is a green result that
 > proves nothing. `--disable-xctest` and `--enable-swift-testing` don't help; `test.sh` adds the one
 > flag that does.
+
+`./test.sh` currently finishes with five failures, and they are permanent rather than regressions:
+`HistoryStoreTests` round-trips a `Date` through ISO-8601 and loses sub-second precision on the way
+back, and `CleanupTests` and `VoiceEditTests` between them hardcode the model name `qwen3:8b` in four
+places to drive the real Ollama daemon, which 404s because this machine doesn't have it installed.
+`TranscriberTests`' warm-transcription-under-2s budget also fails occasionally alongside them and
+passes on a re-run — real but tight, not a sixth permanent failure.
 
 ### Architecture
 
@@ -258,8 +291,6 @@ Stated plainly rather than buried.
 - **Voice editing is built but not wired.** `VoiceEdit.swift` rewrites a selection from a spoken
   instruction and is tested, but no second hotkey triggers it. It needs an `editHotkey` setting and
   a second monitor.
-- **The pill's input meter always reads zero.** `AudioRecorder` doesn't publish a level yet. Its
-  *states* are real; only the bars are cosmetic.
 - **Launch at login is unverified.** The menu toggle calls `SMAppService`, but registration has
   never succeeded from a non-`/Applications`, unnotarized bundle.
 - **Secure input blocks everything, correctly.** In a password field — or when a stale
@@ -276,7 +307,10 @@ Stated plainly rather than buried.
 | Transcribes but never pastes | Accessibility missing | grant it, then relaunch |
 | Every dictation refuses instantly | mic denied, or entitlement missing | `tccutil reset Microphone com.hakeem.sotto`, relaunch |
 | Red pill, nothing inserts | secure input active | leave the password field; reboot if stuck |
+| Red pill, "Cleanup failed — nothing pasted" | the cleanup backend returned an error that isn't a plain connection failure — e.g. a 404 for a model that isn't installed | click the pill while it's showing, or open Settings (⌘,); pick an installed model, Test it, Apply |
+| Settings ▸ Test says a model "leaked reasoning" | the model ignored `think: false` and returned its reasoning instead of cleaned text | pick another model — not every model honours `think: false` |
 | Amber pill, raw text pasted | Ollama unreachable | `ollama serve` |
+| Amber pill, raw text pasted, ~20 s after you spoke | cleanup ran past the 20 s request timeout | pick a faster model in Settings |
 | Worked, then stopped | ad-hoc signature | `codesign -dr - Sotto.app`, rebuild |
 | `build.sh` seems to hang | keychain dialog waiting | click **Always Allow** |
 | Tests "pass" but nothing ran | used `swift test` | use `./test.sh` |
