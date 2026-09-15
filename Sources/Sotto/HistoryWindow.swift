@@ -1,6 +1,14 @@
 import AppKit
 import SwiftUI
 
+/// The tab selection, lifted out of `HistoryView`'s own `@State` so `HistoryWindowController` can
+/// set it from outside the view — task 18 opens the window directly on Settings via ⌘,, which
+/// happens before any SwiftUI state for a freshly-created view even exists.
+@MainActor
+final class HistoryWindowTab: ObservableObject {
+    @Published var index = 0
+}
+
 /// The history window, opened from the menu bar or by relaunching Sotto from Spotlight.
 ///
 /// Sotto is `LSUIElement`, so it owns no window by default and never becomes the active app on its
@@ -9,8 +17,9 @@ import SwiftUI
 @MainActor
 final class HistoryWindowController: NSWindowController {
     private let viewModel: HistoryViewModel
+    private let tab = HistoryWindowTab()
 
-    init(store: HistoryStore, hotkeyLabel: String?, cleaner: Cleaner?) {
+    init(store: HistoryStore, hotkeyLabel: String?, cleaner: Cleaner?, model: ModelSettingsModel?) {
         let viewModel = HistoryViewModel(store: store)
         self.viewModel = viewModel
 
@@ -43,7 +52,9 @@ final class HistoryWindowController: NSWindowController {
             rootView: HistoryView(
                 viewModel: viewModel,
                 promptModel: PromptPlaygroundModel(cleaner: cleaner),
+                settingsModel: model,
                 hotkeyLabel: hotkeyLabel,
+                tab: tab,
                 onMinimize: { [weak window] in window?.miniaturize(nil) },
                 onZoom: { [weak window] in window?.zoom(nil) },
                 onClose: { [weak window] in window?.close() }
@@ -59,17 +70,24 @@ final class HistoryWindowController: NSWindowController {
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }
+
+    /// Opens the window on a specific tab — task 18 uses this to land ⌘, straight on Settings
+    /// instead of wherever the window last happened to be showing.
+    func show(tab index: Int) {
+        tab.index = index
+        show()
+    }
 }
 
 struct HistoryView: View {
     @ObservedObject var viewModel: HistoryViewModel
     @ObservedObject var promptModel: PromptPlaygroundModel
+    let settingsModel: ModelSettingsModel?
     let hotkeyLabel: String?
+    @ObservedObject var tab: HistoryWindowTab
     let onMinimize: () -> Void
     let onZoom: () -> Void
     let onClose: () -> Void
-
-    @State private var tab = 0
 
     private static let controlHeight: CGFloat = 24
 
@@ -78,16 +96,29 @@ struct HistoryView: View {
             ChicagoTitleBar(title: "Sotto", onMinimize: onMinimize, onZoom: onZoom, onClose: onClose)
             statStrip
 
-            ChicagoTabBar(titles: ["History", "Prompt"], selection: $tab)
+            ChicagoTabBar(titles: ["History", "Prompt", "Settings"], selection: $tab.index)
                 .padding(.horizontal, 6)
                 .padding(.top, 6)
 
-            if tab == 0 {
+            switch tab.index {
+            case 0:
                 toolbar
                 listView
-            } else {
+            case 1:
                 PromptPlaygroundView(model: promptModel)
                     .padding(.top, 6)
+            case 2:
+                if let settingsModel {
+                    ModelSettingsView(model: settingsModel)
+                        .padding(.top, 6)
+                } else {
+                    Text("No cleanup model configured.")
+                        .font(Chicago.ui(11))
+                        .foregroundStyle(Chicago.muted)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            default:
+                EmptyView()
             }
 
             statusBar
@@ -243,7 +274,7 @@ struct HistoryView: View {
         HStack(spacing: 4) {
             statusPane(countText, width: 150)
             statusPane(hotkeyText, width: 190)
-            statusPane("~/Library/Application Support/Sotto/history.jsonl", width: nil)
+            statusPane(thirdPaneText, width: nil)
         }
         .font(Chicago.ui(10))
         .foregroundStyle(Chicago.muted)
@@ -260,6 +291,14 @@ struct HistoryView: View {
             .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
             .frame(height: 19)
             .chicagoThinSunken()
+    }
+
+    // The Settings tab is about settings.json, not history.jsonl — the third pane names whichever
+    // file the visible tab actually reads from.
+    private var thirdPaneText: String {
+        tab.index == 2
+            ? "~/Library/Application Support/Sotto/settings.json"
+            : "~/Library/Application Support/Sotto/history.jsonl"
     }
 
     private var countText: String {
