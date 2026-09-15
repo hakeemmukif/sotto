@@ -237,8 +237,8 @@ struct PillWindowTests {
         let screen = NSRect(x: 0, y: 0, width: 2560, height: 1440)
         let size = NSSize(width: 120, height: 36)
 
-        let anchored = PillWindow.placement(caret: NSRect(x: 800, y: 900, width: 2, height: 20), screen: screen, size: size)
-        let fallback = PillWindow.placement(caret: nil, screen: screen, size: size)
+        let anchored = PillWindow.placement(caret: NSRect(x: 800, y: 900, width: 2, height: 20), windowRect: nil, screen: screen, size: size)
+        let fallback = PillWindow.placement(caret: nil, windowRect: nil, screen: screen, size: size)
 
         #expect(screen.contains(anchored))
         #expect(screen.contains(fallback))
@@ -257,9 +257,76 @@ struct PillWindowTests {
                 NSRect(x: 0, y: 0, width: 2, height: 20),
                 NSRect(x: 2559, y: 0, width: 2, height: 20),
             ] {
-                let placed = PillWindow.placement(caret: caret, screen: screen, size: size)
+                let placed = PillWindow.placement(caret: caret, windowRect: nil, screen: screen, size: size)
                 #expect(screen.contains(placed), "pill escaped the screen for caret \(caret) at \(size)")
             }
         }
+    }
+
+    // The bug this replaces: near the bottom edge, clamping the below-caret rect slid it up over the
+    // very line the user is typing. A three-line failure pill (72 pt) hits this well before the caret
+    // reaches the edge itself.
+    @Test func aCaretNearTheBottomEdgeFlipsAboveInsteadOfOverlappingTheLineBeingTyped() {
+        let screen = NSRect(x: 0, y: 0, width: 2560, height: 1440)
+        let size = NSSize(width: 360, height: 72)
+        let caret = NSRect(x: 1280, y: 20, width: 2, height: 20)
+
+        let placed = PillWindow.placement(caret: caret, windowRect: nil, screen: screen, size: size)
+
+        #expect(placed.minY >= caret.maxY)
+        #expect(screen.contains(placed))
+    }
+
+    // Guards the pre-task-13 behaviour: with room below, the pill still sits 8 pt under the caret.
+    @Test func aCaretWithRoomBelowIsUnchangedEightPointsBelowIt() {
+        let screen = NSRect(x: 0, y: 0, width: 2560, height: 1440)
+        let size = NSSize(width: 360, height: 72)
+        let caret = NSRect(x: 1280, y: 900, width: 2, height: 20)
+
+        let placed = PillWindow.placement(caret: caret, windowRect: nil, screen: screen, size: size)
+
+        #expect(placed.minY == caret.minY - size.height - 8)
+        #expect(placed.midX == caret.midX)
+    }
+
+    // The middle tier: no caret, but a focused window to anchor to instead of the whole screen.
+    @Test func aFocusedWindowStandsInWhenThereIsNoCaret() {
+        let screen = NSRect(x: 0, y: 0, width: 2560, height: 1440)
+        let size = NSSize(width: 120, height: 36)
+        let window = NSRect(x: 200, y: 100, width: 800, height: 600)
+
+        let placed = PillWindow.placement(caret: nil, windowRect: window, screen: screen, size: size)
+
+        #expect(placed.midX == window.midX)
+        #expect(screen.contains(placed))
+    }
+
+    @Test func placementAnchorPrefersCaretThenTheFocusedWindowThenTheScreen() {
+        let screen = NSRect(x: 0, y: 0, width: 2560, height: 1440)
+        let caret = NSRect(x: 800, y: 900, width: 2, height: 20)
+        let window = NSRect(x: 100, y: 100, width: 800, height: 600)
+
+        #expect(PillWindow.placementAnchor(caret: caret, windowRect: window, screen: screen) == .caret(caret))
+        #expect(PillWindow.placementAnchor(caret: nil, windowRect: window, screen: screen) == .focusedWindow(window))
+        #expect(PillWindow.placementAnchor(caret: nil, windowRect: nil, screen: screen) == .screen(screen))
+    }
+
+    @Test func screenContainingPicksTheDisplayTheAnchorIsOn() {
+        let primary = NSRect(x: 0, y: 0, width: 1728, height: 1117)
+        let secondary = NSRect(x: 1728, y: 0, width: 2560, height: 1440)
+        let screens = [primary, secondary]
+
+        #expect(PillWindow.screen(containing: NSRect(x: 800, y: 500, width: 2, height: 20), in: screens, fallback: primary) == primary)
+        #expect(PillWindow.screen(containing: NSRect(x: 2000, y: 500, width: 2, height: 20), in: screens, fallback: primary) == secondary)
+        #expect(PillWindow.screen(containing: nil, in: screens, fallback: primary) == primary)
+
+        // Off in space, disjoint from both displays: nothing intersects, so it falls back.
+        #expect(PillWindow.screen(containing: NSRect(x: -500, y: -500, width: 10, height: 10), in: screens, fallback: primary) == primary)
+
+        // Straddles the boundary at x 1728 with its centre in neither display (above primary's 1117 pt
+        // height, left of secondary's 1728 pt start) — the secondary's overlap (72×150) beats the
+        // primary's (128×67), so the tie is broken by area, not by which edge it crosses.
+        let straddling = NSRect(x: 1600, y: 1050, width: 200, height: 150)
+        #expect(PillWindow.screen(containing: straddling, in: screens, fallback: primary) == secondary)
     }
 }
