@@ -20,7 +20,7 @@ enum PillState: Equatable {
         case .secureInputActive: self = .secureInput
         case .backendUnavailable: self = .pastedRaw
         case let .permissionMissing(what): self = .failed(what)
-        case let .failed(reason): self = .failed(reason)
+        case let .failed(_, reason): self = .failed(reason)
         }
     }
 }
