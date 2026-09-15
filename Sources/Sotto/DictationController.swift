@@ -101,7 +101,7 @@ extension Hotkey {
 /// Wraps a real `Cleaner` to adapt the cleanup prompt to whatever app is frontmost when cleanup
 /// runs, so `run()` and the designated init stay untouched: they still just call
 /// `cleaner.clean(transcript, system: Prompts.cleanup)`.
-private struct ProfiledCleaner: Cleaner {
+struct ProfiledCleaner: Cleaner {
     let underlying: Cleaner
     let appProfiles: [String: String]
     let vocabulary: String?
@@ -190,6 +190,7 @@ final class DictationController: @unchecked Sendable {
     convenience init(
         settings: Settings,
         whisperBinaryPath: String,
+        cleaner: Cleaner?,
         history: History = History(),
         store: HistoryStore? = nil,
         onStateChange: @escaping @Sendable (Int, DictationState) -> Void
@@ -199,7 +200,7 @@ final class DictationController: @unchecked Sendable {
         }
         let hotkey = try Hotkey(settingsValue: settings.hotkey)
         let vocabularyPrompt = try Vocabulary.whisperPrompt(settings.vocabulary)
-        let cleaner = try DictationController.cleaner(for: settings).map {
+        let cleaner = cleaner.map {
             ProfiledCleaner(
                 underlying: $0,
                 appProfiles: settings.appProfiles,

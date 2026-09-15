@@ -72,8 +72,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let settings = try Settings.load()
             hotkeyLabel = settings.hotkey
             // The same backend the cleanup pass uses. Enhance is a second prompt over one client,
-            // not a second provider to configure.
-            cleaner = try? DictationController.cleaner(for: settings)
+            // not a second provider to configure. Built once here, in a CleanerSlot, so the settings
+            // panel can swap the model later without relaunching Sotto.
+            let cleanerSlot = try DictationController.cleaner(for: settings).map {
+                CleanerSlot($0, model: settings.cleanupModel)
+            }
+            cleaner = cleanerSlot
             // Measured 8.44 s cold against 0.91 s warm: without this the first dictation after a
             // reboot takes eight seconds. Off the main thread, or it delays launch by exactly that.
             let transcriber = Transcriber(binaryPath: Self.whisperBinaryPath, modelPath: settings.whisperModelPath)
@@ -92,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let controller = try DictationController(
                 settings: settings,
                 whisperBinaryPath: Self.whisperBinaryPath,
+                cleaner: cleanerSlot,
                 history: history,
                 store: store
             ) { [pill] sequence, state in
