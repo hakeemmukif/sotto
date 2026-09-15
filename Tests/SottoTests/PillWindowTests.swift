@@ -52,7 +52,7 @@ struct PillWindowTests {
         #expect(PillState(.secureInputActive) == .secureInput)
         #expect(PillState(.backendUnavailable) == .pastedRaw)
         #expect(PillState(.permissionMissing("Microphone")) == .failed("Microphone"))
-        #expect(PillState(.failed("boom")) == .failed("boom"))
+        #expect(PillState(.failed(stage: .cleanup, reason: "boom")) == .failed("boom"))
 
         #expect(PillState(.done) == nil)
         #expect(PillState(.cancelled) == nil)

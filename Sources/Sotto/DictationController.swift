@@ -18,6 +18,14 @@ enum DictationError: Error, Equatable, CustomStringConvertible {
     }
 }
 
+// Exists for routing a failure to its remedy, not for display — the pill still shows only `reason`.
+/// Which phase of a dictation failed. This is for routing, not display: a cleanup failure is fixed
+/// in the settings panel and a missing permission is fixed in System Settings, and the pill needs to
+/// know which without parsing the reason string for clues.
+enum FailureStage: Equatable, Sendable {
+    case launch, recording, transcription, cleanup, insertion
+}
+
 /// What the pill renders. Every state a job can end in is here, because an error that leaves nothing
 /// on screen is indistinguishable from Sotto not working.
 enum DictationState: Equatable, Sendable {
@@ -35,7 +43,7 @@ enum DictationState: Equatable, Sendable {
     // transcript was inserted anyway, and the pill goes amber.
     case backendUnavailable
     case permissionMissing(String)
-    case failed(String)
+    case failed(stage: FailureStage, reason: String)
 }
 
 extension Hotkey {
@@ -277,7 +285,7 @@ final class DictationController: @unchecked Sendable {
         // A start arriving while a hold is still open means that hold's release was lost — the tap
         // was torn down mid-hold, say. It can never deposit, and the gate would stall behind it.
         if let abandoned {
-            onStateChange(abandoned.sequence, .failed("the hold ended without a release"))
+            onStateChange(abandoned.sequence, .failed(stage: .recording, reason: "the hold ended without a release"))
             deposit(abandoned.sequence, .nothing)
         }
 
@@ -300,7 +308,11 @@ final class DictationController: @unchecked Sendable {
             onStateChange(sequence, .secureInputActive)
             deposit(sequence, .nothing)
         } catch {
-            onStateChange(sequence, .failed("\(error)"))
+            // `.recording` names the phase of work, not a state this job reached: it fails here
+            // precisely because `startRecording` never got far enough to emit `.recording`.
+            // `.launch` is reserved for `startListening` failing at app start, which has a different
+            // remedy — the app is not listening at all, rather than one dictation not beginning.
+            onStateChange(sequence, .failed(stage: .recording, reason: "\(error)"))
             deposit(sequence, .nothing)
         }
     }
@@ -329,7 +341,7 @@ final class DictationController: @unchecked Sendable {
                 )
             }
         } catch {
-            onStateChange(sequence, .failed("\(error)"))
+            onStateChange(sequence, .failed(stage: .recording, reason: "\(error)"))
             deposit(sequence, .nothing)
         }
     }
@@ -361,7 +373,7 @@ final class DictationController: @unchecked Sendable {
             defer { try? FileManager.default.removeItem(at: wav) }
             transcript = try transcribe(wav)
         } catch {
-            onStateChange(sequence, .failed("\(error)"))
+            onStateChange(sequence, .failed(stage: .transcription, reason: "\(error)"))
             deposit(sequence, .nothing)
             return
         }
@@ -383,7 +395,7 @@ final class DictationController: @unchecked Sendable {
             } catch CleanupError.backendUnavailable {
                 deposit(sequence, .text(transcript, permit: permit, raw: true, origin: origin))
             } catch {
-                onStateChange(sequence, .failed("\(error)"))
+                onStateChange(sequence, .failed(stage: .cleanup, reason: "\(error)"))
                 deposit(sequence, .nothing)
             }
         }
@@ -429,7 +441,7 @@ final class DictationController: @unchecked Sendable {
             } catch InsertionError.secureInputActive {
                 onStateChange(sequence, .secureInputActive)
             } catch {
-                onStateChange(sequence, .failed("\(error)"))
+                onStateChange(sequence, .failed(stage: .insertion, reason: "\(error)"))
             }
         }
     }
