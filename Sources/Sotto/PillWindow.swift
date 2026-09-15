@@ -74,14 +74,19 @@ final class PillWindow {
     func show(_ state: PillState) {
         // No attached display means there is nowhere to draw. That is not a degraded pill, it is the
         // absence of a screen, so nothing is invented to stand in for one.
-        guard let screen = NSScreen.main?.visibleFrame else { return }
+        guard let mainFrame = NSScreen.main?.visibleFrame else { return }
         shown = state
         host.rootView = PillContentView(state: state)
         // Clickable only once the job is over. While the job is live a paste is still pending, and
         // the pill is the one window that must never come between the caret and that paste.
         panel.ignoresMouseEvents = state.isLive
+
+        let caret = Self.caretRect()
+        // NSScreen.main is not reliably the caret's display for an LSUIElement app with no key window,
+        // so the caret's own screen is picked explicitly rather than assumed.
+        let screen = Self.screen(containing: caret, in: NSScreen.screens.map(\.visibleFrame), fallback: mainFrame)
         panel.setFrame(
-            Self.placement(caret: Self.caretRect(), screen: screen, size: host.fittingSize),
+            Self.placement(caret: caret, windowRect: Self.focusedWindowRect(), screen: screen, size: host.fittingSize),
             display: true
         )
         // orderFrontRegardless, never makeKeyAndOrderFront: the latter would activate the panel.
@@ -117,26 +122,64 @@ final class PillWindow {
         }
     }
 
-    /// Anchored just below the caret when the focused app exposes one. An app that does not is given
-    /// bottom-centre of the active screen rather than no pill at all — the pill must be visible while
-    /// the hotkey is held, so this is a designed placement, not a silent fallback.
-    static func placement(caret: NSRect?, screen: NSRect, size: NSSize) -> NSRect {
-        guard let caret else {
-            return NSRect(
-                x: screen.midX - size.width / 2,
-                y: screen.minY + 80,
+    /// Which anchor a placement is built around. Caret beats the focused window's bottom-centre beats
+    /// the screen's bottom-centre — each tier is reached only because accessibility couldn't supply
+    /// the one before it, not because it was preferred.
+    enum PlacementAnchor: Equatable {
+        case caret(NSRect)
+        case focusedWindow(NSRect)
+        case screen(NSRect)
+    }
+
+    static func placementAnchor(caret: NSRect?, windowRect: NSRect?, screen: NSRect) -> PlacementAnchor {
+        if let caret { return .caret(caret) }
+        if let windowRect { return .focusedWindow(windowRect) }
+        return .screen(screen)
+    }
+
+    /// Anchored just below the caret when the focused app exposes one. When accessibility can't supply
+    /// a caret — support for kAXBoundsForRangeParameterizedAttribute varies per app, so this is
+    /// ordinary — the focused window's bottom-centre stands in, and when there is no focused window
+    /// either, the screen's bottom-centre, 80 pt up. All three are designed placements: the pill must
+    /// be visible while the hotkey is held, never simply absent.
+    static func placement(caret: NSRect?, windowRect: NSRect?, screen: NSRect, size: NSSize) -> NSRect {
+        switch placementAnchor(caret: caret, windowRect: windowRect, screen: screen) {
+        case .screen(let screen):
+            return bottomCentre(of: screen, size: size)
+
+        case .focusedWindow(let window):
+            return clamp(bottomCentre(of: window, size: size), within: screen)
+
+        case .caret(let caret):
+            let below = NSRect(
+                x: caret.midX - size.width / 2,
+                y: caret.minY - size.height - 8,
                 width: size.width,
                 height: size.height
             )
-        }
+            if below.minY >= screen.minY {
+                return clamp(below, within: screen)
+            }
 
-        let preferred = NSRect(
-            x: caret.midX - size.width / 2,
-            y: caret.minY - size.height - 8,
-            width: size.width,
-            height: size.height
-        )
-        return clamp(preferred, within: screen)
+            // Below would run under the line being typed near the bottom edge — now that a failure
+            // pill can be three lines tall this happens well before the caret reaches the edge itself.
+            // Flip above the caret instead; only clamp the original position if neither fits.
+            let above = NSRect(
+                x: caret.midX - size.width / 2,
+                y: caret.maxY + 8,
+                width: size.width,
+                height: size.height
+            )
+            if above.maxY <= screen.maxY {
+                return clamp(above, within: screen)
+            }
+
+            return clamp(below, within: screen)
+        }
+    }
+
+    private static func bottomCentre(of rect: NSRect, size: NSSize) -> NSRect {
+        NSRect(x: rect.midX - size.width / 2, y: rect.minY + 80, width: size.width, height: size.height)
     }
 
     private static func clamp(_ rect: NSRect, within screen: NSRect) -> NSRect {
@@ -145,6 +188,28 @@ final class PillWindow {
         placed.origin.y = min(max(rect.minY, screen.minY), screen.maxY - rect.height)
         return placed
     }
+
+    /// Picks the screen an anchor actually sits on: the one whose frame contains its centre, else the
+    /// one with the largest intersection, else the fallback. NSScreen.main is not reliably the display
+    /// an AX-reported anchor is on for an LSUIElement app with no key window, so without this a caret
+    /// on a second monitor could be clamped onto the first. Screens are a parameter so this is testable
+    /// without a second display.
+    static func screen(containing anchor: NSRect?, in screens: [NSRect], fallback: NSRect) -> NSRect {
+        guard let anchor else { return fallback }
+
+        if let containing = screens.first(where: { $0.contains(NSPoint(x: anchor.midX, y: anchor.midY)) }) {
+            return containing
+        }
+
+        if let overlapping = screens.max(by: { area(of: $0.intersection(anchor)) < area(of: $1.intersection(anchor)) }),
+           area(of: overlapping.intersection(anchor)) > 0 {
+            return overlapping
+        }
+
+        return fallback
+    }
+
+    private static func area(of rect: NSRect) -> CGFloat { rect.width * rect.height }
 
     /// The caret in screen coordinates, when the focused element exposes one. Support varies per app
     /// — the same Accessibility variance task 12 is built around — so a nil here is ordinary.
@@ -169,6 +234,34 @@ final class PillWindow {
         var rect = CGRect.zero
         guard AXValueGetValue(boundsValue as! AXValue, .cgRect, &rect) else { return nil }
         return flipToScreenCoordinates(rect)
+    }
+
+    /// The focused window's frame in screen coordinates, when the focused application exposes one.
+    /// This is the middle placement tier, reached only once the caret itself came back nil.
+    private static func focusedWindowRect() -> NSRect? {
+        let system = AXUIElementCreateSystemWide()
+        var app: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute as CFString, &app) == .success,
+              let application = app else { return nil }
+
+        var window: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(application as! AXUIElement, kAXFocusedWindowAttribute as CFString, &window) == .success,
+              let focusedWindow = window else { return nil }
+
+        var positionValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(focusedWindow as! AXUIElement, kAXPositionAttribute as CFString, &positionValue) == .success,
+              let position = positionValue else { return nil }
+
+        var sizeValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(focusedWindow as! AXUIElement, kAXSizeAttribute as CFString, &sizeValue) == .success,
+              let windowSize = sizeValue else { return nil }
+
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(position as! AXValue, .cgPoint, &origin),
+              AXValueGetValue(windowSize as! AXValue, .cgSize, &size) else { return nil }
+
+        return flipToScreenCoordinates(CGRect(origin: origin, size: size))
     }
 
     // The Accessibility API reports top-left origin; AppKit windows use bottom-left.
