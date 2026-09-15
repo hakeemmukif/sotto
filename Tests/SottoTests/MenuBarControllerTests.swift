@@ -54,6 +54,11 @@ private final class PasteboardSpy {
     func record(_ text: String) { copied.append(text) }
 }
 
+private final class SettingsSpy {
+    private(set) var callCount = 0
+    func record() { callCount += 1 }
+}
+
 @MainActor
 private func makeController(
     history: History = History(),
@@ -63,7 +68,8 @@ private func makeController(
     calls: Calls = Calls(),
     loginItemStub: LoginItemStub = LoginItemStub(),
     pasteboard: PasteboardSpy = PasteboardSpy(),
-    statusItem: NSStatusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    statusItem: NSStatusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength),
+    showSettings: @escaping () -> Void = {}
 ) -> MenuBarController {
     MenuBarController(
         statusItem: statusItem,
@@ -76,7 +82,8 @@ private func makeController(
         registerLoginItem: { try loginItemStub.register() },
         unregisterLoginItem: { try await loginItemStub.unregister() },
         loginItemStatus: { loginItemStub.status },
-        copyToPasteboard: { pasteboard.record($0) }
+        copyToPasteboard: { pasteboard.record($0) },
+        showSettings: showSettings
     )
 }
 
@@ -239,6 +246,26 @@ struct MenuBarHistoryTests {
         controller.copyHistoryEntry(item)
 
         #expect(pasteboard.copied == ["insert this"])
+    }
+}
+
+@Suite("Menu bar — opening settings", .serialized)
+@MainActor
+struct MenuBarSettingsTests {
+    // Several failure messages already say "Settings…" — this is the menu item that name refers to.
+    @Test func theMenuContainsASettingsItemWithCommandComma() throws {
+        let controller = makeController()
+        let item = try #require(controller.menu.items.first { $0.title == "Settings…" })
+        #expect(item.keyEquivalent == ",")
+    }
+
+    @Test func selectingSettingsInvokesTheInjectedClosureExactlyOnce() {
+        let spy = SettingsSpy()
+        let controller = makeController(showSettings: { spy.record() })
+
+        controller.openSettings()
+
+        #expect(spy.callCount == 1)
     }
 }
 

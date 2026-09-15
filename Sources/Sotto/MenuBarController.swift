@@ -21,6 +21,7 @@ final class MenuBarController: NSObject {
     private let loginItemStatus: () -> SMAppService.Status
     private let copyToPasteboard: (String) -> Void
     private let showHistory: () -> Void
+    private let showSettings: () -> Void
 
     private var isDictationEnabled: Bool
     private var dictationError: String?
@@ -45,7 +46,8 @@ final class MenuBarController: NSObject {
         unregisterLoginItem: @escaping () async throws -> Void,
         loginItemStatus: @escaping () -> SMAppService.Status,
         copyToPasteboard: @escaping (String) -> Void,
-        showHistory: @escaping () -> Void = {}
+        showHistory: @escaping () -> Void = {},
+        showSettings: @escaping () -> Void = {}
     ) {
         self.statusItem = statusItem
         normalImage = statusItem.button?.image
@@ -60,6 +62,7 @@ final class MenuBarController: NSObject {
         self.loginItemStatus = loginItemStatus
         self.copyToPasteboard = copyToPasteboard
         self.showHistory = showHistory
+        self.showSettings = showSettings
         super.init()
         rebuildMenu()
     }
@@ -109,6 +112,10 @@ final class MenuBarController: NSObject {
 
     @objc func openHistory() {
         showHistory()
+    }
+
+    @objc func openSettings() {
+        showSettings()
     }
 
     @objc func copyHistoryEntry(_ sender: NSMenuItem) {
@@ -192,6 +199,10 @@ final class MenuBarController: NSObject {
         let historyItem = NSMenuItem(title: "History…", action: #selector(openHistory), keyEquivalent: "y")
         historyItem.target = self
         menu.addItem(historyItem)
+
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
 
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))

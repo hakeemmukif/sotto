@@ -194,8 +194,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 unregisterLoginItem: { try await SMAppService.mainApp.unregister() },
                 loginItemStatus: { SMAppService.mainApp.status },
                 copyToPasteboard: copyToPasteboard,
-                showHistory: { [weak self] in self?.showHistory() }
+                showHistory: { [weak self] in self?.showHistory() },
+                showSettings: { [weak self] in self?.showSettings() }
             )
+
+            if settings.cleanupBackend == .ollama {
+                checkCleanupModelInstalled(model: settings.cleanupModel)
+            }
         } catch {
             let message = "\(error)"
             menuBar = MenuBarController(
@@ -210,7 +215,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 unregisterLoginItem: { try await SMAppService.mainApp.unregister() },
                 loginItemStatus: { SMAppService.mainApp.status },
                 copyToPasteboard: copyToPasteboard,
-                showHistory: { [weak self] in self?.showHistory() }
+                showHistory: { [weak self] in self?.showHistory() },
+                showSettings: { [weak self] in self?.showSettings() }
             )
             pill.show(.failed(stage: .launch, reason: message))
         }
@@ -222,6 +228,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         historyWindow = controller
         controller.show()
+    }
+
+    // Tab index 2 is Settings — see the tab bar's titles in HistoryWindow.swift. ⌘, lands here
+    // instead of wherever the window last happened to be showing.
+    private func showSettings() {
+        let controller = historyWindow ?? HistoryWindowController(
+            store: store, hotkeyLabel: hotkeyLabel, cleaner: cleaner, model: modelSettingsModel
+        )
+        historyWindow = controller
+        controller.show(tab: 2)
+    }
+
+    // Ollama can answer "is this model installed" in milliseconds, so there is no excuse for
+    // cleanup to fail silently at first dictation the way it did for five days when settings.json
+    // named a model that was never pulled. Off the main thread like the transcriber warm-up above,
+    // for the same reason: a synchronous network call here would delay launch.
+    private func checkCleanupModelInstalled(model: String) {
+        Task.detached(priority: .utility) {
+            do {
+                let installed = try await OllamaProbe().installedModels()
+                if !installed.contains(where: { $0.name == model }) {
+                    await Self.diagnose("cleanup model '\(model)' not installed")
+                    await MainActor.run { [weak self] in self?.menuBar?.setCleanupWarning(model) }
+                }
+            } catch {
+                // The daemon being unreachable is not the same fact as the model being missing —
+                // Ollama.app may still be starting at login, and a menu warning on every cold boot
+                // would be noise the amber/raw-paste path at runtime already covers.
+                await Self.diagnose("cleanup model presence check failed — \(error)")
+            }
+        }
     }
 
     /// Sotto has no Dock icon, so relaunching it from Spotlight or Finder reactivates the running
