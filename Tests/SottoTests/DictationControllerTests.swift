@@ -254,6 +254,7 @@ struct DictationWiringTests {
             try DictationController(
                 settings: settings(whisperBackend: .groq),
                 whisperBinaryPath: "/opt/homebrew/bin/whisper-cli",
+                cleaner: nil,
                 onStateChange: { _, _ in }
             )
         }
@@ -264,6 +265,7 @@ struct DictationWiringTests {
             try DictationController(
                 settings: settings(hotkey: "banana"),
                 whisperBinaryPath: "/opt/homebrew/bin/whisper-cli",
+                cleaner: nil,
                 onStateChange: { _, _ in }
             )
         }
@@ -273,6 +275,7 @@ struct DictationWiringTests {
         _ = try DictationController(
             settings: settings(),
             whisperBinaryPath: "/opt/homebrew/bin/whisper-cli",
+            cleaner: nil,
             onStateChange: { _, _ in }
         )
     }
