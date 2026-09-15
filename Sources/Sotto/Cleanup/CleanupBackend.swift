@@ -73,8 +73,19 @@ enum CleanupHTTP {
     }
 
     static func post(json: Data, to endpoint: URL, headers: [String: String]) async throws -> Data {
-        let request = makeRequest(json: json, endpoint: endpoint, headers: headers)
+        try await send(makeRequest(json: json, endpoint: endpoint, headers: headers))
+    }
 
+    static func get(_ endpoint: URL) async throws -> Data {
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        return try await send(request)
+    }
+
+    // `post` and `get` only differ in the request they build; every failure they can hit —
+    // unreachable host, non-HTTP response, non-200 status — is classified identically here.
+    private static func send(_ request: URLRequest) async throws -> Data {
         let data: Data
         let response: URLResponse
         do {
