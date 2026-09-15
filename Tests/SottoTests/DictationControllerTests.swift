@@ -585,4 +585,39 @@ struct DictationControllerTests {
         #expect(log.insertedTexts == ["raw one"])
         #expect(log.states(forJob: 1) == [.recording, .transcribing, .inserting, .done])
     }
+
+    @Test func aFreshControllerHasNoJobsInFlight() {
+        let controller = makeController(
+            log: Log(),
+            starts: Counter(),
+            stops: Counter(),
+            transcripts: [:],
+            cleaner: nil
+        )
+
+        #expect(controller.hasJobsInFlight == false)
+    }
+
+    // `holding` and `pending` alone go quiet for the whole transcription-and-cleanup stretch — deposit()
+    // hasn't run yet — so this exercises the same window `aPressDuringTranscribingStartsASecondRecordingAndBothLand`
+    // proves is still mid-flight, and checks the gate closes again once the job actually lands.
+    @Test func hasJobsInFlightIsTrueDuringTranscriptionAndFalseOnceTheJobIsDone() async throws {
+        let log = Log()
+        let controller = makeController(
+            log: log,
+            starts: Counter(),
+            stops: Counter(),
+            transcripts: [1: "one"],
+            transcribeDelays: [1: 0.3],
+            cleaner: cleanerAppending(" cleaned", log: log)
+        )
+
+        controller.handle(.start)
+        controller.handle(.stop)
+        #expect(await waitUntil { log.startedTranscriptions == ["one"] })
+        #expect(controller.hasJobsInFlight == true)
+
+        #expect(await waitUntil { log.states(forJob: 1) == [.recording, .transcribing, .cleaning, .inserting, .done] })
+        #expect(controller.hasJobsInFlight == false)
+    }
 }
