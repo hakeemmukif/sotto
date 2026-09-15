@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var historyWindow: HistoryWindowController?
     private var hotkeyLabel: String?
     private var cleaner: Cleaner?
+    private var register: CleanupFailureRegister?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppPresence.install()
@@ -81,6 +82,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 CleanerSlot($0, model: settings.cleanupModel)
             }
             cleaner = cleanerSlot
+            let register = CleanupFailureRegister()
+            self.register = register
             // Measured 8.44 s cold against 0.91 s warm: without this the first dictation after a
             // reboot takes eight seconds. Off the main thread, or it delays launch by exactly that.
             let transcriber = Transcriber(binaryPath: Self.whisperBinaryPath, modelPath: settings.whisperModelPath)
@@ -103,11 +106,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onLevel: { [pill] level in pill.updateLevel(level) },
                 history: history,
                 store: store
-            ) { [pill] sequence, state in
+            ) { [pill, register, weak self] sequence, state in
                 Self.diagnose("job \(sequence) → \(state)")
+                register.record(sequence: sequence, state: state, at: Date())
                 DispatchQueue.main.async {
-                    guard let visible = PillState(state) else { return pill.hide() }
-                    pill.show(visible)
+                    if let visible = PillState(state) {
+                        pill.show(visible)
+                    } else {
+                        pill.hide()
+                    }
+                    switch state {
+                    case .recording, .transcribing, .cleaning, .inserting,
+                         .cancelled, .aborted, .secureInputActive, .backendUnavailable:
+                        break
+                    case let .permissionMissing(what):
+                        self?.menuBar?.reportFailure("\(what) permission missing")
+                    case let .failed(_, reason):
+                        self?.menuBar?.reportFailure(reason)
+                    case .done:
+                        self?.menuBar?.clearFailure()
+                    }
                 }
             }
             self.controller = controller
