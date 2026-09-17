@@ -48,7 +48,7 @@ final class HistoryWindowController: NSWindowController {
 
         super.init(window: window)
 
-        window.contentView = NSHostingView(
+        let hosting = NSHostingView(
             rootView: HistoryView(
                 viewModel: viewModel,
                 promptModel: PromptPlaygroundModel(cleaner: cleaner),
@@ -60,6 +60,12 @@ final class HistoryWindowController: NSWindowController {
                 onClose: { [weak window] in window?.close() }
             )
         )
+        // NSHostingView reports an intrinsic size by default, and AppKit then constrains the
+        // content view to it — the panel kept its 400-pt content height inside a 1400-pt window and
+        // the rest of the frame was bare window background. Let the window drive the size instead.
+        hosting.sizingOptions = []
+        hosting.autoresizingMask = [.width, .height]
+        window.contentView = hosting
     }
 
     @available(*, unavailable)

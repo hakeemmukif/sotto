@@ -15,6 +15,7 @@ struct ModelSettingsView: View {
             healthBox
         }
         .padding(.horizontal, 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // Matches the doc comment on `refresh()`: called when the tab opens, and again on Refresh.
         // `.task` fires once per mount, so leaving the tab and coming back re-fires it; toggling
         // some unrelated @Published value on the model does not.
@@ -257,6 +258,9 @@ struct ModelSettingsView: View {
             }
         }
         .padding(10)
+        // The health box is the tab's flexible row, the way the list is the History tab's: it takes
+        // whatever height is left so the panel has no dead face colour under it at any window size.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .chicagoSunken()
     }
 
