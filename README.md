@@ -94,6 +94,8 @@ means it asks again on every build.
 
 Then grant permissions (next section), quit and relaunch, and hold your hotkey.
 
+Testing a prebuilt copy someone sent you, rather than building from source? Follow [docs/TESTERS.md](docs/TESTERS.md).
+
 ---
 
 ## Permissions
