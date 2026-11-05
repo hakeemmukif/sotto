@@ -2,12 +2,9 @@
   "hotkey": "fn",
   "whisperModelPath": "~/Library/Application Support/Sotto/models/ggml-medium.en.bin",
   "whisperBackend": "local",
-  "cleanupBackend": "ollama",
+  "cleanupBackend": "none",
   "cleanupModel": "qwen3:8b",
-  "vocabulary": [
-    "pnpm",
-    "Drizzle"
-  ],
+  "vocabulary": [],
   "appProfiles": {
     "default": "Fix punctuation and capitalisation using standard sentence case.",
     "com.apple.Terminal": "Lowercase, no trailing period.",

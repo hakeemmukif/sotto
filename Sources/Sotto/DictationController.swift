@@ -113,9 +113,19 @@ struct ProfiledCleaner: Cleaner {
         )
         // The vocabulary steers whisper *and* the cleanup pass: knowing "Drizzle" is a proper noun
         // stops the model correcting it back to "drizzle" after whisper got it right.
+        //
+        // Worded as an instruction the model follows, never as a statement about the terms that it
+        // could instead be reporting. Measured 2026-09-18 against qwen2.5:3b-instruct: when whisper
+        // finds no speech in a clip it does not return nothing — ggml-medium.en answers a silent
+        // recording with exactly "you", every duration from one to ten seconds, and answers quiet
+        // audio with "..." — so the cleanup pass is handed something with nothing to clean and
+        // copies the last sentence it read. The earlier phrasing, "These terms are spelled
+        // correctly, leave them as they are: …", came back verbatim in 15 of 32 runs and was
+        // pasted into the user's text. This phrasing came back in 0 of 32, while still holding
+        // "Drizzle" capitalised in 6 runs out of 6.
         var system = system + "\n\n" + profile
         if let vocabulary {
-            system += "\n\nThese terms are spelled correctly, leave them as they are: \(vocabulary)"
+            system += "\n\nKeep these terms exactly as written: \(vocabulary)."
         }
         return try await underlying.clean(transcript, system: system)
     }

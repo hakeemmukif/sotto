@@ -24,7 +24,7 @@ codesign -f -s "$IDENTITY" --options runtime --entitlements Resources/Sotto.enti
 DR="$(codesign -dr - "$BUNDLE")"
 echo "$DR"
 
-if ! echo "$DR" | grep -q 'certificate leaf = H"f8597f841d13b056d65c62c81db433aa524c688a"'; then
+if ! echo "$DR" | grep -q 'certificate root = H"a22ef0b5e30d5b9650c2b0db015badb15e924a7c"'; then
     echo "error: designated requirement does not match Sotto Dev identity" >&2
     exit 1
 fi

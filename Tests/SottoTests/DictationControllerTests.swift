@@ -621,3 +621,77 @@ struct DictationControllerTests {
         #expect(controller.hasJobsInFlight == false)
     }
 }
+
+// The cleanup prompt is assembled here, and the last thing it says is what a small local model
+// copies when it is handed a transcript with nothing in it to clean — whisper answers silence with
+// exactly "you". Reproduced 2026-09-18 against qwen2.5:3b-instruct: the vocabulary line came back
+// verbatim in 15 of 32 runs under the old phrasing and in 0 of 32 under this one. These tests pin
+// the wording and the order, because both are what keep it from coming back.
+private final class SystemPromptRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String?
+
+    func record(_ system: String) {
+        lock.lock()
+        value = system
+        lock.unlock()
+    }
+
+    var recorded: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}
+
+@Suite("ProfiledCleaner — the assembled cleanup system prompt", .serialized)
+struct ProfiledCleanerTests {
+    private static let profile = "Fix punctuation and capitalisation using standard sentence case."
+
+    private func assembled(vocabulary: String?) async throws -> String {
+        let recorder = SystemPromptRecorder()
+        let cleaner = ProfiledCleaner(
+            underlying: StubCleaner { _, system in
+                recorder.record(system)
+                return "cleaned"
+            },
+            appProfiles: ["default": Self.profile],
+            vocabulary: vocabulary
+        )
+
+        _ = try await cleaner.clean("you", system: Prompts.cleanup)
+
+        return try #require(recorder.recorded)
+    }
+
+    @Test func theVocabularyIsAnInstructionRatherThanAStatementAboutTheTerms() async throws {
+        let system = try await assembled(vocabulary: "pnpm, Drizzle")
+
+        #expect(system.contains("Keep these terms exactly as written: pnpm, Drizzle."))
+        // The phrasing that leaked. Seeing it again means the copy-back has come back.
+        #expect(!system.contains("spelled correctly"))
+    }
+
+    // The order is load-bearing and was measured, not chosen: moving the base prompt last stops the
+    // copy-back too, but it costs the per-app profiles their effect — under it the Terminal profile
+    // started ending sentences with a period it is explicitly told not to use. So the vocabulary is
+    // what got reworded, and neither of the other two moved.
+    @Test func theBasePromptComesFirstAndTheProfilePrecedesTheVocabulary() async throws {
+        let system = try await assembled(vocabulary: "pnpm, Drizzle")
+
+        let base = try #require(system.range(of: Prompts.cleanup))
+        let profile = try #require(system.range(of: Self.profile))
+        let vocabulary = try #require(system.range(of: "Keep these terms exactly as written"))
+
+        #expect(base.lowerBound < profile.lowerBound)
+        #expect(profile.lowerBound < vocabulary.lowerBound)
+    }
+
+    @Test func noVocabularyLeavesTheProfileAsTheOnlyAddition() async throws {
+        let system = try await assembled(vocabulary: nil)
+
+        #expect(system.hasPrefix(Prompts.cleanup))
+        #expect(system.hasSuffix(Self.profile))
+        #expect(!system.contains("Keep these terms"))
+    }
+}

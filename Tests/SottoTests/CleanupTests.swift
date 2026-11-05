@@ -4,7 +4,16 @@ import Testing
 
 private let ollamaEndpoint = URL(string: "http://localhost:11434/api/generate")!
 private let closedPortEndpoint = URL(string: "http://127.0.0.1:1/api/generate")!
-private let ollamaModel = "qwen3:8b"
+// The live-model tests run against the model the app is actually configured with, read from the
+// user's settings.json. Until 2026-11-05 this was hardcoded to qwen3:8b, which is no longer installed
+// (the machine runs one local model); the WHY comments below cite qwen3:8b measurements and stay as
+// history. Settings.load throws a specific error if the file or key is missing, and Ollama answers
+// 404 naming the model if it is not pulled — neither is skipped or defaulted.
+func liveCleanupModel() throws -> String {
+    try Settings.load().cleanupModel
+}
+// Unused by the closed-port test: the request never reaches a model.
+private let unreachableModel = "unused"
 
 // The real transcript of fixtures/bench.wav, verified 2026-08-05. It ends in a question on purpose:
 // a model that answers instead of cleaning replies to that question rather than returning it.
@@ -33,7 +42,7 @@ private func writeEnvFile(_ contents: String) throws -> URL {
 @Suite("Cleanup — drives the real Ollama", .serialized)
 struct CleanupTests {
     @Test func theBenchSentenceIsCleanedAndNotAnswered() async throws {
-        let backend = OllamaBackend(endpoint: ollamaEndpoint, model: ollamaModel)
+        let backend = OllamaBackend(endpoint: ollamaEndpoint, model: try liveCleanupModel())
         let cleaned = try await backend.clean(benchTranscript, system: Prompts.cleanup)
         print("CLEANED OUTPUT: \(cleaned)")
 
@@ -57,7 +66,7 @@ struct CleanupTests {
     // This is the think:false regression alarm as much as a latency budget: with qwen3's default
     // reasoning block the same call takes many seconds. Measured 2026-08-05: 0.74 s warm.
     @Test func aWarmCleanupCompletesUnderTwoSeconds() async throws {
-        let backend = OllamaBackend(endpoint: ollamaEndpoint, model: ollamaModel)
+        let backend = OllamaBackend(endpoint: ollamaEndpoint, model: try liveCleanupModel())
         _ = try await backend.clean(benchTranscript, system: Prompts.cleanup)
 
         let start = Date()
@@ -69,7 +78,7 @@ struct CleanupTests {
     }
 
     @Test func anUnreachableOllamaThrowsBackendUnavailable() async throws {
-        let backend = OllamaBackend(endpoint: closedPortEndpoint, model: ollamaModel)
+        let backend = OllamaBackend(endpoint: closedPortEndpoint, model: unreachableModel)
 
         await #expect(throws: CleanupError.backendUnavailable) {
             try await backend.clean(benchTranscript, system: Prompts.cleanup)

@@ -8,6 +8,16 @@ struct DictationRecord: Codable, Equatable, Sendable {
     let bundleID: String?
     let durationMs: Int
 
+    init(id: UUID, timestamp: Date, raw: String, cleaned: String, bundleID: String?, durationMs: Int) {
+        self.id = id
+        // .iso8601 stores whole seconds, so the record must already be whole seconds to equal its reload.
+        self.timestamp = Date(timeIntervalSinceReferenceDate: timestamp.timeIntervalSinceReferenceDate.rounded())
+        self.raw = raw
+        self.cleaned = cleaned
+        self.bundleID = bundleID
+        self.durationMs = durationMs
+    }
+
     // Not stored: a word count that disagrees with the text it counts is worse than no count.
     var wordCount: Int {
         cleaned.split(whereSeparator: \.isWhitespace).count

@@ -22,9 +22,9 @@ private func writeFixture(_ json: String) throws -> URL {
 
     #expect(settings.hotkey == "fn")
     #expect(settings.whisperBackend == .local)
-    #expect(settings.cleanupBackend == .ollama)
+    #expect(settings.cleanupBackend == .none)
     #expect(settings.cleanupModel == "qwen3:8b")
-    #expect(settings.vocabulary.contains("Drizzle"))
+    #expect(settings.vocabulary.isEmpty)
     #expect(settings.appProfiles["default"] != nil)
     #expect(settings.insertionMode == .paste)
 }
