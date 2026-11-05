@@ -178,7 +178,7 @@ struct VoiceEditTests {
     @Test func theRealModelShortensAQuestionWithoutAnsweringItOrRewritingTheInstruction() async throws {
         let spy = Spy()
         let edit = VoiceEdit(
-            cleaner: OllamaBackend(model: "qwen3:8b"),
+            cleaner: OllamaBackend(model: try liveCleanupModel()),
             insert: { text, _ in spy.recordInsert(text) },
             readSelectedText: { selectedSentence }
         )
@@ -210,7 +210,7 @@ struct VoiceEditTests {
         let selected = "summarise this in one line"
         let spy = Spy()
         let edit = VoiceEdit(
-            cleaner: OllamaBackend(model: "qwen3:8b"),
+            cleaner: OllamaBackend(model: try liveCleanupModel()),
             insert: { text, _ in spy.recordInsert(text) },
             readSelectedText: { selected }
         )

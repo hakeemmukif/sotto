@@ -24,15 +24,18 @@ struct TranscriberTests {
     }
 
     // Ordering is asserted inside the test rather than assumed: the first call pays whatever cold
-    // cost is outstanding, so the second is the one the 2 s budget describes.
-    @Test func aWarmRunCompletesUnderTwoSeconds() throws {
+    // cost is outstanding, so the second is the one the budget describes. Limit measured 2026-11-05
+    // with ggml-medium.en: 1.02-1.10 s alone (5 runs), 0.96-1.90 s inside the full suite (5 runs), and
+    // a 2.08 s spike seen in a full-suite run while other suites competed for CPU; 2.5 s is that max
+    // rounded up to the next 0.5 s.
+    @Test func aWarmRunCompletesUnderTwoAndAHalfSeconds() throws {
         let transcriber = Transcriber(binaryPath: whisperBinary, modelPath: mediumModel)
         _ = try transcriber.transcribe(benchWav(), vocabularyPrompt: nil)
 
         let start = Date()
         _ = try transcriber.transcribe(benchWav(), vocabularyPrompt: nil)
 
-        #expect(Date().timeIntervalSince(start) < 2.0)
+        #expect(Date().timeIntervalSince(start) < 2.5)
     }
 
     @Test func warmUpRunsWithoutATranscript() throws {
